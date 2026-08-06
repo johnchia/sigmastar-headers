@@ -104,26 +104,18 @@ _Static_assert(offsetof(i6_isp_ae_status, sensorGain) == 28, "AE status sensor g
  * against a 46088-byte payload) cannot be the layout, and its avgY log
  * line is averaging two cells per sample.
  *
- * What those eight spare bytes are, and whether they lead or trail, the
- * sizes cannot say. Hence the union: hal_isp.c tries both placements
- * against the grid dimensions MI_ISP_CUS3A_GetAeStatus reports and
- * accepts the one that matches, rather than picking one and averaging
- * whatever lands at that offset. Neither matching means no luma -- not a
- * plausible-looking number derived from the wrong bytes.
+ * The eight spare bytes lead, and they are the grid dimensions:
+ * MI_ISP_AE_HW_STATISTICS_t is { nBlkX, nBlkY, nAvg[128*90] }, and
+ * MI_ISP_AE_AVGS is { uAvgR, uAvgG, uAvgB, uAvgY } -- so the lane order is
+ * r,g,b,y with luma at index 3. Both were measured before the vendor
+ * headers were available (a 32x32 grid reading back at offset 8; lane 3
+ * being the BT.601 sum of lanes 0..2 over a thousand cells) and the
+ * headers agree with the measurement.
  *
- * Measured on an SSC30KQ + GC4653: the grid reads back 32x32 with the
- * cells at offset 8, so the eight bytes LEAD and they are the grid
- * dimensions themselves. 128x90 is the payload's maximum,
- * not the live grid -- the buffer stays sized for the declared 46088
- * either way, and the grid actually averaged is whatever AE status
+ * 128x90 is the payload's maximum, not the live grid -- an SSC30KQ +
+ * GC4653 reports 32x32. The buffer stays sized for the declared 46088
+ * regardless, and the grid actually averaged is whatever AE status
  * reports.
- *
- * The lane order is r,g,b,y, confirmed from the cells themselves: over 1022
- * scored cells lane 3 is the BT.601 sum of lanes 0..2 to within integer
- * rounding, which no other assignment of r, g and b reproduces. A frame
- * *mean* cannot settle it -- see the reasoning at the lane check in
- * hal_isp.c, which is where the two ways of getting this wrong are written
- * down.
  */
 #define I6_ISP_AE_BLK_X 128
 #define I6_ISP_AE_BLK_Y 90
@@ -133,20 +125,15 @@ _Static_assert(offsetof(i6_isp_ae_status, sensorGain) == 28, "AE status sensor g
 /* Byte lane within a cell. The order is r, g, b, y -- see above. */
 #define I6_ISP_AE_CELL_Y 3
 
-typedef union {
-    unsigned char raw[I6_ISP_AE_BLK_MAX * I6_ISP_AE_CELL_SZ + 8];
-    struct {
-        unsigned int blkX, blkY;
-        unsigned char cell[I6_ISP_AE_BLK_MAX * I6_ISP_AE_CELL_SZ];
-    } lead;
-    struct {
-        unsigned char cell[I6_ISP_AE_BLK_MAX * I6_ISP_AE_CELL_SZ];
-        unsigned int blkX, blkY;
-    } trail;
+typedef struct {
+    unsigned int blkX;
+    unsigned int blkY;
+    unsigned char cell[I6_ISP_AE_BLK_MAX * I6_ISP_AE_CELL_SZ];
 } i6_isp_ae_hw_stats;
 
 _Static_assert(sizeof(i6_isp_ae_hw_stats) == 46088,
                "AE HW stats must match the 46088-byte payload the wrapper declares");
+_Static_assert(offsetof(i6_isp_ae_hw_stats, cell) == 8, "AE HW stats cells follow the dimensions");
 
 /*
  * IQ parameter-init status. MI_ISP_IQ_GetParaInitStatus, command 0x1002,
