@@ -36,12 +36,22 @@ typedef enum {
     I6_VPE_MODE_END
 } i6_vpe_mode;
 
+/*
+ * MI_VPE_SensorChannel_e. A bitmask, not an index: the 2021-09-02 drop
+ * numbered these sequentially and the 2022-06-01 drop made them bits to
+ * support multi-sensor stitch, moving ID2 from 3 to 4 and ID3 from 4 to 8.
+ * ID0 and ID1 happen to be the same either way.
+ */
 typedef enum {
-    I6_VPE_SENS_INVALID,
-    I6_VPE_SENS_ID0,
-    I6_VPE_SENS_ID1,
-    I6_VPE_SENS_ID2,
-    I6_VPE_SENS_ID3,
+    I6_VPE_SENS_INVALID = 0,
+    I6_VPE_SENS_ID0 = 0x1,
+    I6_VPE_SENS_ID1 = 0x2,
+    I6_VPE_SENS_ID2 = 0x4,
+    I6_VPE_SENS_ID3 = 0x8,
+    I6_VPE_SENS_ID4 = 0x10,
+    I6_VPE_SENS_ID5 = 0x20,
+    I6_VPE_SENS_ID6 = 0x40,
+    I6_VPE_SENS_ID7 = 0x80,
     I6_VPE_SENS_END,
 } i6_vpe_sens;
 
@@ -72,8 +82,15 @@ typedef struct {
             unsigned int calibPolyBinSize;
         } calibInfo;
     };
-    char lensAdjOn;
 } i6e_vpe_ildc;
+
+/* MI_VPE_LdcInitPara_t is 84 bytes and has no trailing bEnLdc of its own --
+ * i6e_vpe_chn carries that, immediately after this struct. A duplicate here
+ * pushes the channel attr's own bEnLdc and u32ChnPortMode 4 bytes late, so
+ * MI_VPE_CreateChannel reads bEnLdc out of this struct's tail and never sees
+ * chnPort at all. Zero-initialised callers do not notice; enabling LDC or
+ * setting a channel port mode would look like the SDK ignoring the request. */
+_Static_assert(sizeof(i6e_vpe_ildc) == 84, "MI_VPE_LdcInitPara_t is 84 bytes");
 
 typedef struct {
     char bypassOn;
@@ -112,6 +129,10 @@ typedef struct {
     char lensAdjOn;
     unsigned int chnPort;
 } i6e_vpe_chn;
+
+_Static_assert(sizeof(i6e_vpe_chn) == 192, "MI_VPE_ChannelAttr_t is 192 bytes");
+_Static_assert(offsetof(i6e_vpe_chn, lensAdjOn) == 184, "bEnLdc sits at +184");
+_Static_assert(offsetof(i6e_vpe_chn, chnPort) == 188, "u32ChnPortMode sits at +188");
 
 typedef struct {
     i6_common_dim capt;
