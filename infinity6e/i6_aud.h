@@ -74,19 +74,40 @@ typedef enum {
     I6_AUD_SND_END
 } i6_aud_snd;
 
+/*
+ * MI_AUDIO_I2sConfig_t. 20 bytes here against the 0601 header's 12, and
+ * the extra two fields are REQUIRED -- do not trim them to match the
+ * header.
+ *
+ * They were trimmed once, on the reasoning that the header is the vendor's
+ * own word and that the union is the last member of MI_AUDIO_Attr_t so the
+ * fields ahead of it stay put. Both halves of that are true and the
+ * conclusion is still wrong: MI_AI_SetPubAttr then fails with 0xa0058003,
+ * illegal parameter, and audio capture does not start at all. Measured by
+ * A/B on the board, two builds seconds apart against the same device
+ * state.
+ *
+ * So the board's libmi_ai.so reads 20 bytes where the SDK drop's header
+ * declares 12, exactly as libmi_isp.so declares 28 for a 4-byte defog
+ * struct. The rule both cases establish: where the shipped library and the
+ * header disagree about a *size*, the library wins, because the library is
+ * what does the reading. The header is still the better witness for field
+ * order and enumerator values.
+ *
+ * tdmSlotNum and bit24On are SSC377-shaped names for whatever the extra
+ * eight bytes are here; hal_audio.c leaves them zero and only sets the
+ * three fields the header does declare.
+ */
 typedef struct {
     int leftJustOn;
     i6_aud_clk clock;
     char syncRxClkOn;
+    unsigned int tdmSlotNum;
+    int bit24On;
 } i6_aud_i2s;
 
-/* MI_AUDIO_I2sConfig_t is 12 bytes: eFmt, eMclk, bSyncClock. The
- * tdmSlotNum and bit24On that used to trail here are SSC377-shaped, where
- * the struct has a wholly different and longer layout. Benign in practice,
- * because this union is the last member of MI_AUDIO_Attr_t and the three
- * fields the library reads were correctly placed -- but wrong, and the same
- * species of error as the sliceId in i6_venc_packinfo. */
-_Static_assert(sizeof(i6_aud_i2s) == 12, "MI_AUDIO_I2sConfig_t is 12 bytes");
+_Static_assert(sizeof(i6_aud_i2s) == 20,
+               "MI_AI_SetPubAttr rejects a 12-byte I2S config -- see the comment above");
 
 typedef struct {
     /* MI accepts 8/16/32/48 kHz only -- the docs say so explicitly, and
