@@ -127,6 +127,11 @@ typedef enum {
     I6_SYS_BUFDATA_RAW = 0,
     I6_SYS_BUFDATA_FRAME = 1,
     I6_SYS_BUFDATA_META = 2,
+    /* Real, and the arm it selects is what makes MI_SYS_BufInfo_t as large
+     * as it is -- see the 272-byte note above. Nothing on a single-plane
+     * path produces one, but with _END sitting at 3 such a frame reads as
+     * the terminator rather than as a type. */
+    I6_SYS_BUFDATA_MULTIPLANE = 3,
     I6_SYS_BUFDATA_END
 } i6_sys_bufdata;
 
