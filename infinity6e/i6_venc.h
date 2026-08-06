@@ -6,9 +6,10 @@
  *
  * Rate-control mode numbering differs between the original Infinity6
  * (series 0xEF, I6OG_VENC_RATEMODE_*) and everything later, because 0xEF
- * has no H264ABR and the values after it shift by one. Infinity6E is
- * 0xF1, so use the plain I6_VENC_RATEMODE_* set; the I6OG_ enum is kept
- * only to stay diffable against upstream, which supports both.
+ * has no UBR modes: its H264UBR slot does not exist, so everything from
+ * MJPEGCBR onward sits one lower than on 0xF1. Infinity6E is 0xF1, so use
+ * the plain I6_VENC_RATEMODE_* set; the I6OG_ enum is kept only to stay
+ * diffable against upstream, which supports both.
  *
  * I6_VENC_CHN_NUM below is where hal_caps.c's INFINITY6E max_enc_channels
  * comes from -- 9 addressable channels, capped to RSS_MAX_ENC_CHANNELS.
@@ -70,15 +71,16 @@ typedef enum {
 typedef enum {
     I6_VENC_RATEMODE_H264CBR = 1,
     I6_VENC_RATEMODE_H264VBR,
-    I6_VENC_RATEMODE_H264ABR,
-    I6_VENC_RATEMODE_H264QP,
+    I6_VENC_RATEMODE_H264FIXQP,
     I6_VENC_RATEMODE_H264AVBR,
+    I6_VENC_RATEMODE_H264UBR,
     I6_VENC_RATEMODE_MJPGCBR,
-    I6_VENC_RATEMODE_MJPGQP,
+    I6_VENC_RATEMODE_MJPGFIXQP,
     I6_VENC_RATEMODE_H265CBR,
     I6_VENC_RATEMODE_H265VBR,
-    I6_VENC_RATEMODE_H265QP,
+    I6_VENC_RATEMODE_H265FIXQP,
     I6_VENC_RATEMODE_H265AVBR,
+    I6_VENC_RATEMODE_H265UBR,
     I6_VENC_RATEMODE_END
 } i6_venc_ratemode;
 
@@ -156,15 +158,6 @@ typedef struct {
 } i6_venc_rate_h26xqp;
 
 typedef struct {
-    unsigned int gop;
-    unsigned int statTime;
-    unsigned int fpsNum;
-    unsigned int fpsDen;
-    unsigned int avgBitrate;
-    unsigned int maxBitrate;
-} i6_venc_rate_h26xabr;
-
-typedef struct {
     unsigned int bitrate;
     unsigned int fpsNum;
     unsigned int fpsDen;
@@ -182,7 +175,6 @@ typedef struct {
         i6_venc_rate_h26xcbr h264Cbr;
         i6_venc_rate_h26xvbr h264Vbr;
         i6_venc_rate_h26xqp h264Qp;
-        i6_venc_rate_h26xabr h264Abr;
         i6_venc_rate_h26xvbr h264Avbr;
         i6_venc_rate_mjpgcbr mjpgCbr;
         i6_venc_rate_mjpgqp mjpgQp;
