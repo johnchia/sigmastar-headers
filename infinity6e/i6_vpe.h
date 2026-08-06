@@ -124,6 +124,12 @@ typedef struct {
     char invertOn;
     char rotateOn;
     i6_vpe_mode mode;
+    /*
+     * MI_VPE_ChannelAttr_t.tIspInitPara, not a version string: a 64-byte
+     * blob VPE forwards to the ISP as early-init sensor state -- first
+     * frames' fps, shutter, gains and AWB gains. Zeroed here, which is the
+     * "no opinion" value.
+     */
     i6_vpe_iqver iqparam;
     i6e_vpe_ildc lensInit;
     char lensAdjOn;

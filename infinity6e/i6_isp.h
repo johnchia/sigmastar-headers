@@ -30,13 +30,12 @@
 #include "i6_common.h"
 
 /*
- * AE exposure limits. MI_ISP_AE_{Get,Set}ExposureLimit, command 0x1409.
+ * AE exposure limits. MI_ISP_AE_{Get,Set}ExposureLimit, command 0x1409,
+ * payload 32 -- MI_ISP_AE_EXPO_LIMIT_TYPE_t field for field.
  *
- * The 32-byte payload size the wrapper hardcodes matches these eight
- * unsigned ints exactly (checked by disassembling the board's own
- * libmi_isp.so -- see the objdump technique in i6_sys.h). Note the field
- * order: the two gain minima precede the two maxima, which is not the
- * min/max pairing the shutter and aperture fields above them use.
+ * Note the field order: the two gain minima precede the two maxima, which
+ * is not the min/max pairing the shutter and aperture fields above them
+ * use. It is the vendor's, not a transcription slip.
  */
 typedef struct {
     unsigned int minShutterUs;
@@ -50,67 +49,58 @@ typedef struct {
 } i6_isp_exp;
 
 /*
- * AE status. MI_ISP_CUS3A_GetAeStatus, command 0x2e05.
+ * AE status. MI_ISP_CUS3A_GetAeStatus, command 0x2e05 -- the vendor's
+ * CusAEInfo_t, which is `packed` and exactly 65 bytes.
  *
  * The one MI call that answers "what did the AE converge on" -- shutter
- * in microseconds and the two gains -- which is what day/night detection
- * needs and what MI_ISP_AE_GetManualExpo (the manual *setting*) and
- * GetExposureLimit (the bounds) cannot give. Field order is waybeam's
- * (star6e_cus3a.c, "verified via hex dump" on Star6E); this file adds the
- * size.
+ * and the two gains -- which is what day/night detection needs and what
+ * MI_ISP_AE_GetManualExpo (the manual *setting*) and GetExposureLimit (the
+ * bounds) cannot give. Shutter is microseconds despite the vendor comment
+ * saying ns; see hal_isp.c.
  *
- * That size is the reason not to copy waybeam's struct as it stands. The
- * wrapper declares a 65-byte payload:
+ * The size is the reason not to copy waybeam's struct as it stands: it
+ * declares the first twelve words and stops at 48 bytes, so the library
+ * writes 17 bytes past it on every call. Everything from preAvgY on exists
+ * to hold that, and the assert is what keeps it holding it.
  *
- *   65d4: sub  sp, #32
- *   65e4: movs r3, #65        @ 0x41   -- payload size
- *   65e8: movw r3, #11781     @ 0x2e05 -- command
- *   65fe: blx  _MI_ISP_GetIspApiData
- *
- * and _MI_ISP_GetIspApiData copies all 65 bytes into the caller's buffer.
- * waybeam declares twelve u32s, 48 bytes, on the stack -- so the vendor
- * library writes 17 bytes past it on every call. The tail below exists to
- * hold that overrun, and the assert is what keeps it holding it. Anything
- * past ispGainHdrShort is unread, not unwritten.
+ * The tail is bytes rather than fields because CusAEInfo_t is packed and
+ * its remaining members are not aligned: HDRCtlMode is a u8 at 52, so
+ * FNx10 lands at 53, CurFPS at 57 and PreWeightY -- ROI-weighted frame
+ * brightness -- at 61. preAvgY at 48 is the one that is 4-aligned and can
+ * be read directly.
  */
 typedef struct {
-    unsigned int reserved0[3];
+    unsigned int reserved0[3]; /* Size, hist1, hist2 */
     unsigned int avgBlkX;
     unsigned int avgBlkY;
-    unsigned int reserved1;
+    unsigned int reserved1; /* avgs */
     unsigned int shutterUs;
     unsigned int sensorGain;
     unsigned int ispGain;
     unsigned int shutterHdrShortUs;
     unsigned int sensorGainHdrShort;
     unsigned int ispGainHdrShort;
-    unsigned char tail[20];
+    unsigned int preAvgY; /* previous frame's brightness, CUS3A V1.1 */
+    unsigned char tail[16];
 } i6_isp_ae_status;
 
 _Static_assert(sizeof(i6_isp_ae_status) >= 65,
                "AE status must hold the 65 bytes the wrapper copies into it");
 _Static_assert(offsetof(i6_isp_ae_status, shutterUs) == 24, "AE status shutter offset");
 _Static_assert(offsetof(i6_isp_ae_status, sensorGain) == 28, "AE status sensor gain offset");
+_Static_assert(offsetof(i6_isp_ae_status, preAvgY) == 48, "AE status PreAvgY offset");
 
 /*
  * Hardware AE average statistics. MI_ISP_AE_GetAeHwAvgStats, command
- * 0x2e01, payload 46088 bytes (0xb408 at that wrapper's `movw r3`).
+ * 0x2e01, payload 46088 -- MI_ISP_AE_HW_STATISTICS_t, which is
+ * { nBlkX, nBlkY, nAvg[128*90] } over MI_ISP_AE_AVGS cells of
+ * { uAvgR, uAvgG, uAvgB, uAvgY }. So the dimensions lead and luma is lane
+ * 3.
  *
- * 46088 = 128 * 90 * 4 + 8, and the neighbouring
- * MI_ISP_AWB_GetAwbHwAvgStats declares 34568 = 128 * 90 * 3 + 8. Two
- * calls agreeing on a 128x90 grid at one byte per channel, plus the same
- * eight spare bytes, is what fixes the cell width at four bytes here --
- * so waybeam's `short r, g, b, y` (8 bytes a cell, a 92160-byte struct
- * against a 46088-byte payload) cannot be the layout, and its avgY log
- * line is averaging two cells per sample.
- *
- * The eight spare bytes lead, and they are the grid dimensions:
- * MI_ISP_AE_HW_STATISTICS_t is { nBlkX, nBlkY, nAvg[128*90] }, and
- * MI_ISP_AE_AVGS is { uAvgR, uAvgG, uAvgB, uAvgY } -- so the lane order is
- * r,g,b,y with luma at index 3. Both were measured before the vendor
- * headers were available (a 32x32 grid reading back at offset 8; lane 3
- * being the BT.601 sum of lanes 0..2 over a thousand cells) and the
- * headers agree with the measurement.
+ * Both of those were measured before the vendor headers were available,
+ * and the headers agree, so waybeam's `short r, g, b, y` -- 8 bytes a
+ * cell, a 92160-byte struct against a 46088-byte payload -- is not the
+ * layout, and its avgY log line is averaging two cells per sample.
  *
  * 128x90 is the payload's maximum, not the live grid -- an SSC30KQ +
  * GC4653 reports 32x32. The buffer stays sized for the declared 46088

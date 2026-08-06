@@ -46,15 +46,13 @@ typedef struct {
     char bitswap;
     i6_common_sync sync;
     /*
-     * The vendor's MI_VIF_DevAttr_t ends in a u32MultiDevMap, and it must be
-     * declared here: MI_VIF_SetDevAttr block-copies 3 x 16 bytes plus one
-     * trailing word -- 52, not 48 -- out of the pointer it is given, then
-     * sends an ioctl whose hardcoded payload length is 56, i.e. 4 bytes of
-     * device id followed by those 52. (Both numbers read off a disassembly of
-     * libmi_vif.so.) So the field sits at exactly +48 and sizeof must be 52.
+     * MI_VIF_DevAttr_t.u32DevStitchMask, "multi vif dev bitmask by
+     * MI_VIF_DevId_e", at +48 in a 52-byte struct. Set it to
+     * E_MI_VIF_DEVICE_ID0 = 1.
      *
-     * Omitting it does not fail loudly. The vendor reads a word of the
-     * caller's stack frame and passes it to the driver as a device bitmap,
+     * Omitting it does not fail loudly, which is why it is called out
+     * rather than simply declared. The vendor reads a word of the caller's
+     * stack frame and passes it to the driver as a device bitmap,
      * deterministically for a given binary -- one stack layout leaves the 1
      * the driver wants, another leaves a fragment of the sensor-name string
      * (0x36346367, "gc46"), and VIF then never syncs: dmesg loops on

@@ -13,8 +13,8 @@
  * The frame-buffer entry points (MI_SYS_ChnOutputPortGetBuf / PutBuf,
  * MI_SYS_GetFd / CloseFd, MI_SYS_FlushInvCache, MI_SYS_Va2Pa) have no divinus
  * counterpart -- it reads encoded streams out of VENC and never touches a raw
- * frame -- so their types and signatures come from waybeam_venc plus
- * libmi_sys.so's disassembly. See the i6_sys_bufinfo comment below.
+ * frame -- so their types came from waybeam_venc, which does read VIF/VPE output
+ * on this silicon, and are now checked against the vendor headers.
  *
  * Copyright (c) 2024 OpenIPC
  * SPDX-License-Identifier: MIT
@@ -95,33 +95,24 @@ typedef struct {
 } i6_sys_ver;
 
 /*
- * Output-port frame buffers.
+ * Output-port frame buffers -- MI_SYS_BufInfo_t and the union it carries.
  *
- * Not from divinus -- it reads encoded streams out of VENC and never touches a
- * raw frame -- so the layout comes from waybeam_venc, which does read VIF/VPE
- * output on this exact silicon: StabSysBufInfo_t in src/star6e_framing_stab.c
- * (Infinity6E) and IyBufInfo_t in src/star6e_ipu_yolo.c (Infinity6E), plus
- * StabBufInfo_t in src/maruko_framing_stab.c (i6c). Three transcriptions that
- * agree, two of them for this SoC, all three exercised on hardware.
+ * Every header offset below matches the vendor struct field for field, and
+ * the union's largest arm is MI_SYS_FrameDataMultiPlane_t: MI_U8 plus four
+ * 56-byte sub-planes, 232 bytes. MI_BOOL is a 1-byte C99 bool, which is
+ * what puts the union at offset 32.
  *
- * libmi_sys.so's own MI_SYS_ChnOutputPortGetBuf corroborates it. The wrapper
- * memcpy's the 16-byte port descriptor into its ioctl payload, and after the
- * call copies 272 bytes back out to argument 2 and the buffer handle from
- * payload+288 to argument 3. So the kernel's view of this struct is 272 bytes,
- * meaning the vendor union is 232 -- not the 512 waybeam reserves, and not the
- * 104 that the frame-data member alone needs.
+ * Reserving 512 for the union is deliberate over-allocation. 0601's
+ * MI_SYS_BufInfo_t is 264 bytes and the board's libmi_sys.so copies 272
+ * out -- 264 + the trailing u8CusFlag, aligned, so the board's MI_SYS is
+ * very likely newer than the SDK drop these were checked against. Sizing
+ * for the largest thing either could be costs nothing on a stack frame
+ * this code allocates once, and every field read sits in the first 136
+ * bytes regardless.
  *
- * Reserving 512 anyway is deliberate. It is what the proven code does, it
- * cannot under-allocate for a 272-byte copy-out even if another firmware
- * revision grows the union, and every field we read sits in the first 136
- * bytes regardless. The static assertions below pin the copy size and the
- * offsets the kernel writes through, so a later edit cannot quietly shrink
- * this below what MI_SYS memcpy's into it.
- *
- * The 272 figure also settles the bool width: MI_BOOL is a C99 bool (1 byte,
- * per waybeam include/star6e.h), which puts the union at offset 32 and yields
- * align8(32 + 232 + 1) == 272. Four-byte bools would give 280 and every field
- * from bEndOfStream on would be misplaced.
+ * The assertions pin the copy size and the offsets the kernel writes
+ * through, so a later edit cannot quietly shrink this below what MI_SYS
+ * memcpy's into it.
  */
 typedef enum {
     I6_SYS_BUFDATA_RAW = 0,
