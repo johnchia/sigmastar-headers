@@ -183,13 +183,20 @@ typedef struct {
         i6_venc_rate_h26xqp h265Qp;
         i6_venc_rate_h26xvbr h265Avbr;
     };
-    void *extend;
 } i6_venc_rate;
+
+/* No trailing pointer: MI_VENC_RcAttr_t is the mode plus the union, 32
+ * bytes. divinus's extra void *extend made it 36 and i6_venc_chn 76 against
+ * the vendor's 72. Benign only because stRcAttr is the last member of
+ * MI_VENC_ChnAttr_t, so nothing after it was displaced. */
+_Static_assert(sizeof(i6_venc_rate) == 32, "MI_VENC_RcAttr_t is 32 bytes");
 
 typedef struct {
     i6_venc_attrib attrib;
     i6_venc_rate rate;
 } i6_venc_chn;
+
+_Static_assert(sizeof(i6_venc_chn) == 72, "MI_VENC_ChnAttr_t is 72 bytes");
 
 typedef struct {
     unsigned int quality;

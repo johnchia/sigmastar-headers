@@ -78,9 +78,15 @@ typedef struct {
     int leftJustOn;
     i6_aud_clk clock;
     char syncRxClkOn;
-    unsigned int tdmSlotNum;
-    int bit24On;
 } i6_aud_i2s;
+
+/* MI_AUDIO_I2sConfig_t is 12 bytes: eFmt, eMclk, bSyncClock. The
+ * tdmSlotNum and bit24On that used to trail here are SSC377-shaped, where
+ * the struct has a wholly different and longer layout. Benign in practice,
+ * because this union is the last member of MI_AUDIO_Attr_t and the three
+ * fields the library reads were correctly placed -- but wrong, and the same
+ * species of error as the sliceId in i6_venc_packinfo. */
+_Static_assert(sizeof(i6_aud_i2s) == 12, "MI_AUDIO_I2sConfig_t is 12 bytes");
 
 typedef struct {
     /* MI accepts 8/16/32/48 kHz only -- the docs say so explicitly, and
