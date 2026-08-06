@@ -238,7 +238,7 @@ typedef struct {
     i6_venc_packinfo packetInfo[8];
 } i6_venc_pack;
 
-_Static_assert(sizeof(i6_venc_pack) == 136, "i6_venc_pack must match MI_VENC_Stream_t's 136 bytes");
+_Static_assert(sizeof(i6_venc_pack) == 136, "MI_VENC_Pack_t is 136 bytes");
 
 typedef struct {
     unsigned int leftPics;
