@@ -208,8 +208,16 @@ typedef struct {
     i6_venc_nalu packType;
     unsigned int offset;
     unsigned int length;
-    unsigned int sliceId;
 } i6_venc_packinfo;
+
+/* A trailing u32SliceId here is MI 3.0 (it appears in SSC377's
+ * mi_venc_datatype.h and in neither Infinity6E drop). Both divinus and
+ * waybeam carry it, because both are multi-chip; that is why their
+ * agreement is not evidence for this struct. At 16 bytes rather than 12 a
+ * consumer walks packetInfo[] at the wrong stride and reads a neighbouring
+ * offset or length as a NAL type, and i6_venc_pack inherits the error. */
+_Static_assert(sizeof(i6_venc_packinfo) == 12,
+               "i6_venc_packinfo is 12 bytes; a u32SliceId here is MI 3.0");
 
 typedef struct {
     unsigned long long addr;
@@ -222,6 +230,8 @@ typedef struct {
     unsigned int packNum;
     i6_venc_packinfo packetInfo[8];
 } i6_venc_pack;
+
+_Static_assert(sizeof(i6_venc_pack) == 136, "i6_venc_pack must match MI_VENC_Stream_t's 136 bytes");
 
 typedef struct {
     unsigned int leftPics;
