@@ -172,4 +172,64 @@ typedef struct {
  */
 typedef int (*i6_isp_cmd_fn)(int channel, void *payload);
 
+/*
+ * ================================================================
+ * PAYLOAD SIZES AND MANUAL-BLOCK OFFSETS FOR THE MODULES HAL_ISP DRIVES
+ *
+ * PAYLOAD is the size the board's libmi_isp.so wrapper puts in the
+ * descriptor it hands to _MI_ISP_{Get,Set}IspApiData, which is the length
+ * that gets copied into the caller's buffer -- so it sizes the staging
+ * buffer, and under-declaring it means the library writes past the end.
+ * Read out of the wrapper's own `mov r3, #<size>`, the same way as the
+ * typed calls above.
+ *
+ * That is deliberately not "sizeof the vendor struct". The two agree for
+ * every module here except DEFOG, where the blob declares 28 against a
+ * 4-byte MI_ISP_IQ_DEFOG_TYPE_t -- so the blob wins, because it is what
+ * does the copying.
+ *
+ * MANUAL is offsetof(stManual) for the modules whose payload is
+ * { bEnable, enOpType, stAuto[16], stManual }: writing a level anywhere
+ * else lands in the per-ISO auto array, which both fails to take effect
+ * and corrupts one auto entry.
+ *
+ * The two ROWS lists name the vendor type each row addresses so
+ * tests/abi_iq.c can assert all of this against mi_isp_iq_datatype.h and
+ * mi_isp_3a_datatype.h at once. hal_isp.c expands only the numbers.
+ * ================================================================
+ */
+#define I6_ISP_IQ_BRIGHTNESS_PAYLOAD 76
+#define I6_ISP_IQ_BRIGHTNESS_MANUAL  72
+#define I6_ISP_IQ_CONTRAST_PAYLOAD   76
+#define I6_ISP_IQ_CONTRAST_MANUAL    72
+#define I6_ISP_IQ_SATURATION_PAYLOAD 416
+#define I6_ISP_IQ_SATURATION_MANUAL  392
+#define I6_ISP_IQ_SHARPNESS_PAYLOAD  1268
+#define I6_ISP_IQ_SHARPNESS_MANUAL   1192
+#define I6_ISP_IQ_NRLUMA_PAYLOAD     112
+#define I6_ISP_IQ_NRLUMA_MANUAL      104
+#define I6_ISP_IQ_NR3D_PAYLOAD       1776
+#define I6_ISP_IQ_NR3D_MANUAL        1672
+
+#define I6_ISP_IQ_DEFOG_PAYLOAD      28
+#define I6_ISP_IQ_GRAY_PAYLOAD       4
+#define I6_ISP_AE_EVCOMP_PAYLOAD     8
+#define I6_ISP_AE_FLICKER_PAYLOAD    4
+
+/* X(row, vendor type) -- payload is { bEnable, enOpType, stAuto[16], stManual }. */
+#define I6_ISP_IQ_AUTOMAN_ROWS(X)                 \
+    X(IQ_BRIGHTNESS, MI_ISP_IQ_BRIGHTNESS_TYPE_t) \
+    X(IQ_CONTRAST,   MI_ISP_IQ_CONTRAST_TYPE_t)   \
+    X(IQ_SATURATION, MI_ISP_IQ_SATURATION_TYPE_t) \
+    X(IQ_SHARPNESS,  MI_ISP_IQ_SHARPNESS_TYPE_t)  \
+    X(IQ_NRLUMA,     MI_ISP_IQ_NRLUMA_TYPE_t)     \
+    X(IQ_NR3D,       MI_ISP_IQ_NR3D_TYPE_t)
+
+/* X(row, vendor type) -- no auto/manual split; the field written is at offset 0. */
+#define I6_ISP_IQ_FLAT_ROWS(X)                  \
+    X(IQ_DEFOG,   MI_ISP_IQ_DEFOG_TYPE_t)       \
+    X(IQ_GRAY,    MI_ISP_IQ_COLORTOGRAY_TYPE_t) \
+    X(AE_EVCOMP,  MI_ISP_AE_EV_COMP_TYPE_t)     \
+    X(AE_FLICKER, MI_ISP_AE_FLICKER_TYPE_e)
+
 #endif /* SIGMASTAR_I6_ISP_H */
