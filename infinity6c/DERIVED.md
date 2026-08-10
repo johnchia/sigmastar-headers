@@ -61,15 +61,16 @@ Read the frame rather than pattern-matching it.
 | `MI_VIF_OutputPortAttr_t` | 32 | 8 (dev, port) | **24** |
 | `MI_SCL_ChnParam_t` | 12 | 8 (dev, chn) | **4** |
 
-Eleven of the twelve have been checked against divinus's vendored layouts,
-compiled for the 32-bit ARM target, and **all eleven agree** — `i6c_sys_ver` 128,
-`i6c_vif_grp` 28, `i6c_vif_dev` 20, `i6c_vif_port` 24, `i6c_snr_plane` 72,
-`i6c_scl_port` 24, `i6c_venc_chn` 76, `i6c_venc_init` 8, `i6c_venc_jpg` 136,
-`i6c_venc_stat` 40, `i6c_venc_strm` 72. The twelfth, `MI_SCL_ChnParam_t`, has no
-divinus counterpart to check — divinus does not call `MI_SCL_SetChnParam` — so
-`i6c_scl_chn` is declared from the binaries alone. Two more that no payload
-reaches, `i6c_venc_pack` 184 and `i6c_venc_packinfo` 16, come from array strides
-instead, below. The assertions live in the headers themselves, so the check runs
+All twelve have been checked against divinus's vendored layouts, compiled for the
+32-bit ARM target, and **all twelve agree** — `i6c_sys_ver` 128, `i6c_vif_grp` 28,
+`i6c_vif_dev` 20, `i6c_vif_port` 24, `i6c_snr_plane` 72, `i6c_scl_port` 24,
+`i6c_venc_chn` 76, `i6c_venc_init` 8, `i6c_venc_jpg` 136, `i6c_venc_stat` 40,
+`i6c_venc_strm` 72, `i6c_scl_chn` 4. The last of those agrees in a form worth
+spelling out, since an earlier revision here recorded it as having no counterpart
+at all: divinus passes a bare `int *` rather than a struct, so it corroborates the
+one-word payload without naming a type. Two more that no payload reaches,
+`i6c_venc_pack` 184 and `i6c_venc_packinfo` 16, come from array strides instead,
+below. The assertions live in the headers themselves, so the check runs
 on every build rather than once.
 
 **The id-word column used to be an argument count, and is now a reading.** Every
@@ -485,6 +486,10 @@ declaration. It is the one place in this family where a label rests on conventio
 rather than on a read, and it is tolerable only because the failure is visible:
 a turned picture, not corrupted memory.
 
-This is also the only struct here with no divinus counterpart — divinus never calls
-`MI_SCL_SetChnParam` — so there was nothing to check against and nothing to keep
-diffable.
+divinus does reach this entry point, which an earlier revision of these notes
+denied. It binds it as `fnAdjustChannelRotation` and declares the payload not as a
+struct but as a bare `int *rotate`, which is why a search for a `i6c_scl_chn`
+equivalent found nothing. Read for what it is, it corroborates the derivation
+exactly: one word, and that word is the rotation. Wrapping it in a struct is this
+repository's choice, made so the family reads uniformly and so a later member can
+be appended without changing the call.

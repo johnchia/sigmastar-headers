@@ -66,9 +66,10 @@ exports 2574 symbols, and `MI_VIF_CHECK_*` validates fields one at a time — so
 its loads give offsets, the load instruction gives each field's width, and the
 immediate it compares against gives the valid range.
 
-Every struct these headers declare has now been through that, and one — the SCL
-channel parameter — is declared from the binaries with no divinus counterpart at
-all, since divinus does not call that entry point.
+Every struct these headers declare has now been through that. One of them, the SCL
+channel parameter, has no vendored *type* behind it: divinus reaches that entry
+point but passes a bare `int *`, so the struct wrapping that word is this
+repository's own, and the binaries are what say the word is a rotation.
 
 `infinity6c/DERIVED.md` records what has been through that, what it cost, and the
 ways the method misleads. Two worth knowing before trusting a number. The size

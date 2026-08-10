@@ -50,8 +50,11 @@ typedef struct {
 } i6c_scl_port;
 
 /*
- * Rotation, and the only declaration here with no divinus counterpart -- it does
- * not use MI_SCL_SetChnParam, so there was nothing to vendor.
+ * Rotation. divinus reaches this entry point too, but declares the payload as a
+ * bare int * rather than as a struct, so there was no type to vendor -- only a
+ * corroboration that the payload is a single word, and that the word is the
+ * rotation. The struct is this repository's own, for uniformity with the rest of
+ * the family.
  *
  * What the binaries fix is the count and the zero case, not the angles.
  * MI_SCL_CHECK_ChnParam accepts zero immediately and rejects anything above 3, so
