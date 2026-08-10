@@ -25,6 +25,19 @@ prepend their device, channel and port ids to the payload, so the struct is the
 remainder. Read the copy that follows — `ldmia`/`stmia` pairs, or a `memcpy`
 with a literal length — and subtract.
 
+**Read the ioctl command, not the stack frame.** The command word encodes the
+payload size in its `_IOC` size field — bits 16..29 — so the size falls out of the
+`movt` that builds it, with no frame to interpret:
+
+```
+MI_VENC_SetChnAttr:  movt r1, #0x4054   ->  0x4054 & 0x3fff = 84 bytes
+MI_VIF_SetDevAttr:   movt r1, #0x4018   ->  0x4018 & 0x3fff = 24 bytes
+```
+
+This is the method to use. It agrees with every size in the table below, it needs
+no assumption about where a function keeps its size slot, and it is what makes the
+next trap harmless.
+
 **The size slot is not always at `[sp, #4]`.** That offset holds for SYS, VIF,
 SNR and SCL, but VENC builds a larger frame and puts it at `[sp, #28]`. A script
 that assumes the offset reports whatever happens to live there — this is where
@@ -69,6 +82,10 @@ difference is the device and channel ids it prepends. So `MI_VENC_ChnAttr_t` is
     3a4a:  movs r1, #84      @ payload size ...
     3a52:  str  r1, [sp, #28] @ ... into VENC's size slot
 
+Confirmed twice over: `MI_VENC_SetChnAttr` marshals the same 84 and copies the
+same 76 from a different frame layout, and both calls' `_IOC` size fields read
+0x4054, i.e. 84.
+
 divinus's `i6c_venc_chn` is **80**. It is `{ i6c_venc_attrib, i6c_venc_rate }`,
 which measure 40 and 40, and one of them is four bytes too large.
 
@@ -82,6 +99,19 @@ enum plus a union whose largest arm (`attr_h26x`) is 36, giving 40 with no slack
 `i6c_venc_rate` is a mode enum plus a union whose largest arm (`h26xvbr`) is 28,
 which should give 32 rather than 40 — so `i6c_venc_rate` is the one to look at
 first, and its union arms are where the extra words most likely are.
+
+### The four bytes are not localized yet
+
+`MI_VENC_SetRcParam` looked like the way to isolate the rate half, and is not: its
+payload is 64, so the struct it carries is 56, and that is `MI_VENC_RcParam_t` --
+a separate and larger thing than the rate attributes embedded in `ChnAttr`. No
+wrapper marshals either half of `ChnAttr` on its own, so no size read can
+separate them.
+
+Localizing it needs `mi_vcodec.ko`, the same way VIF's group was localized:
+`MI_VENC_CHECK_ChnAttr` will bound fields individually, and the offset at which
+the rate sub-struct begins settles it -- 40 means the attributes are correct and
+the rate is four bytes long, 36 the reverse.
 
 This is the validation earning its keep. VENC is the largest surface in the
 family, and the first number checked against it did not match.
