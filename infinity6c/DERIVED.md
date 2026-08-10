@@ -146,3 +146,13 @@ fields.
 branch with the format string it prints, which the module makes possible — it
 complains in terms of `IntfMode`, `HdrType`, `workmode` and `Clkedge` — but that
 correlation has not been done, so no struct is declared from this yet.
+
+One trap costs an attempt if you do not know it. These are ARM **REL**
+relocations, not RELA, so the addend is stored *in place* rather than in the
+relocation entry. `objdump -r` therefore shows only
+`R_ARM_ABS32  .rodata.str1.1` with no offset, and grepping for an addend finds
+nothing. The string offset is the four-byte word sitting at the literal-pool
+address the relocation points at, so the sequence is: find the pool entry the
+`ldr rN, [pc, #...]` resolves to, read the word stored there, and use it as a
+byte offset into `.rodata.str1.1`
+(`objdump -s -j .rodata.str1.1`). Only then does a branch get a name.
