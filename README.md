@@ -41,16 +41,18 @@ between them is a hypothesis, not evidence.
 
 Names and field order follow divinus so fixes stay diffable against upstream.
 
-### `infinity6c` is derived the same way, but not from divinus
+### `infinity6c` is vendored the same way, and validated harder
 
-Same method — the ABI of prebuilt vendor libraries — and no third-party
-transcription. There is no divinus i6c reconstruction in it to stay diffable
-against, so names follow the vendor's own API rather than divinus's.
+Same method as the family beside it: divinus's `src/hal/star/i6c_*.h` vendored
+under its MIT licence, reworked to stand alone, and corrected where the binaries
+disagree. There is no waybeam transcription for this generation to corroborate
+against, so the validation leans entirely on the shipped artifacts — which turns
+out to be a stronger check than a second reconstruction.
 
-MI marshals through an ioctl, which makes these libraries unusually
-forthcoming. Each userspace wrapper writes the size of the payload it is about
-to hand over into its argument block as a literal, so a struct size can be read
-straight off the disassembly:
+MI marshals through an ioctl, and that makes the artifacts unusually
+forthcoming. Each userspace wrapper writes the size of the payload it is about to
+hand over into its argument block as a literal, so a struct size can be read off
+the disassembly:
 
 ```
 $ arm-linux-*-objdump -d --disassemble=MI_SYS_GetVersion libmi_sys.so
@@ -58,25 +60,23 @@ $ arm-linux-*-objdump -d --disassemble=MI_SYS_GetVersion libmi_sys.so
   str  r3, [sp, #4]    @ into the size slot of the ioctl block
 ```
 
-Two cautions, both learned here. The size slot holds the size of the
-*marshalled block*, which equals the struct only for single-struct setters —
-`MI_SYS_BindChnPort2` reports 56 because it packs two channel ports plus rates.
-And the immediate is not always a size at all: `MI_VENC_CreateChn` yields 295,
-which is not even 4-aligned. Confirm each number against the field
-loads and stores in the same function before believing it, and keep the
-`_Static_assert`s.
+Better still, the per-module kernel objects are **unstripped**. `mi_vif.ko`
+exports 2574 symbols, and `MI_VIF_CHECK_*` validates fields one at a time — so
+its loads give offsets, the load instruction gives each field's width, and the
+immediate it compares against gives the valid range.
 
-## Declarations only
+`infinity6c/DERIVED.md` records what has been through that, what it cost, and
+four ways the method misleads. Two worth knowing before trusting a number: the
+size slot describes the *marshalled block* rather than the struct, so the device
+and channel ids a call prepends have to be subtracted — `MI_VIF_SetDevAttr`
+reports 24 and copies 20 — and the immediate is sometimes not a size at all, as
+`MI_VENC_CreateChn`'s 295 shows.
 
-MI is reached by `dlopen`/`dlsym` rather than by linking `-lmi_*`, so a consumer
-binds to whatever libraries the device itself carries. Nothing here includes
-`dlfcn.h` or depends on a logger or an error-code set; the loaders that do that
-belong to the consumer. Every header compiles standalone under
-`-std=c11 -Wall -Wextra -Werror`.
-
-Where a comment refers to `hal_isp.c`, `hal_caps.c` or similar, it means the
-consumer these were extracted from — [raptor-hal](https://github.com/gtxaspec/raptor-hal)'s
-SigmaStar backend.
+The VIF group layout is the worked example, and it makes the case for checking
+rather than trusting either source. Its size and four field bounds came out of the
+binaries; divinus supplied the field order; and divinus's ordering reproduced a
+size and bounds it had no access to. An earlier guess from the bounds alone had
+two of those fields the wrong way round.
 
 ## Layout, and why there is no SDK version in the path
 

@@ -1,69 +1,174 @@
 /*
- * i6c_sys.h -- SigmaStar MI_SYS types, Infinity6C
+ * i6c_sys.h -- MI_SYS bindings, Infinity6C
  *
- * Derived from the ABI of the prebuilt MI libraries the target ships, the same
- * method the infinity6e family used, and expressed independently -- the names,
- * grouping and commentary here are this repository's, and no third-party
- * transcription was copied into them. Nothing in this family reproduces vendor
- * source.
+ * Vendored from OpenIPC divinus, src/hal/star/i6c_sys.h (MIT), which is why this
+ * file carries divinus's licence. Reworked to stand alone: divinus's internal
+ * includes are dropped, an include guard replaces #pragma once, and the
+ * dlopen/dlsym function table stays with the consumer, since anything naming a
+ * logger or an error-code set belongs on that side of the boundary.
  *
- * MI marshals through an ioctl, which makes the binary unusually forthcoming:
- * each userspace wrapper writes the payload size into its argument block as a
- * literal, so a size can be read off the disassembly rather than guessed. Both
- * facts below came out that way, and either can be re-derived with
+ * These layouts describe the ABI of prebuilt vendor .so files. divinus's are
+ * exercised on this silicon, which is worth more than freshly derived ones --
+ * but it is a reconstruction from a multi-chip HAL, so treat it as a hypothesis
+ * and check it. DERIVED.md carries the sizes and field bounds read out of the
+ * shipped libraries and kernel objects for exactly that, and records which
+ * structs have been through it.
  *
- *     arm-linux-*-objdump -d --disassemble=MI_SYS_GetVersion libmi_sys.so
+ * Keep the i6c_* names and field order as upstream so fixes stay diffable
+ * against divinus.
  *
- * Layouts are pinned by _Static_assert rather than trusted. A wrong one
- * corrupts memory instead of failing to compile, which is the failure this
- * repository exists to make impossible.
- *
- * THE CALLING CONVENTION CHANGED, AND IT IS INVISIBLE
- *
- * Every MI_SYS entry point on this generation leads with a 16-bit SoC id that
- * MI 2.x has no equivalent of. Its width is not an assumption:
- * MI_SYS_GetVersion stores the first argument with strh.w, a halfword store,
- * so the parameter is 16 bits wide and not a promoted int.
- *
- * It selects a die on a multi-die part and is 0 on a single-die camera.
- * Nothing catches getting this wrong. The libraries are reached through
- * dlsym, which resolves by name, so an MI 2.x function table binds against
- * them without complaint and then calls MI_SYS_Init with whatever occupied
- * the first argument register. The argument lists themselves are declared in
- * the consumer's loader, so the warning belongs here with the types it uses.
- *
- * Declarations only. MI is reached by dlopen/dlsym rather than by linking
- * -lmi_*, and the loaders that do so are the consumer's business -- nothing
- * here includes dlfcn.h or depends on a logger or an error-code set.
- *
- * Copyright (C) 2026 Thingino Project
- * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2024 OpenIPC
+ * SPDX-License-Identifier: MIT
  */
 
 #ifndef SIGMASTAR_I6C_SYS_H
 #define SIGMASTAR_I6C_SYS_H
 
-/*
- * MI_SYS_Version_t.
- *
- * A fixed 128-byte field carrying the vendor's build stamp, of the form
- *
- *     Sigmastar Module mi_sys version: project_commit.<x> sdk_commit.<y>
- *     mhal_commit.<z> build_time.<yyyymmddhhmmss>
- *
- * Not guaranteed NUL-terminated, so read it bounded by the array rather than
- * with the string functions. Worth reading rather than skipping: build_time is
- * what confirms the loaded libraries are the drop a consumer's declarations
- * were derived from.
- *
- * The 128 is the library's own number, not a convention: MI_SYS_GetVersion
- * loads #128 into the size slot of the block it hands to ioctl.
- */
+#include "i6c_common.h"
+
+#define I6C_SYS_API "1.0"
+
+typedef enum {
+    I6C_SYS_LINK_FRAMEBASE = 0x1,
+    I6C_SYS_LINK_LOWLATENCY = 0x2,
+    I6C_SYS_LINK_REALTIME = 0x4,
+    I6C_SYS_LINK_AUTOSYNC = 0x8,
+    I6C_SYS_LINK_RING = 0x10
+} i6c_sys_link;
+
+typedef enum {
+    I6C_SYS_MOD_IVE,
+    I6C_SYS_MOD_VDF,
+    I6C_SYS_MOD_VENC,
+    I6C_SYS_MOD_RGN,
+    I6C_SYS_MOD_AI,
+    I6C_SYS_MOD_AO,
+    I6C_SYS_MOD_VIF,
+    I6C_SYS_MOD_VPE,
+    I6C_SYS_MOD_VDEC,
+    I6C_SYS_MOD_SYS,
+    I6C_SYS_MOD_FB,
+    I6C_SYS_MOD_HDMI,
+    I6C_SYS_MOD_DIVP,
+    I6C_SYS_MOD_GFX,
+    I6C_SYS_MOD_VDISP,
+    I6C_SYS_MOD_DISP,
+    I6C_SYS_MOD_OS,
+    I6C_SYS_MOD_IAE,
+    I6C_SYS_MOD_MD,
+    I6C_SYS_MOD_OD,
+    I6C_SYS_MOD_SHADOW,
+    I6C_SYS_MOD_WARP,
+    I6C_SYS_MOD_UAC,
+    I6C_SYS_MOD_LDC,
+    I6C_SYS_MOD_SD,
+    I6C_SYS_MOD_PANEL,
+    I6C_SYS_MOD_CIPHER,
+    I6C_SYS_MOD_SNR,
+    I6C_SYS_MOD_WLAN,
+    I6C_SYS_MOD_IPU,
+    I6C_SYS_MOD_MIPITX,
+    I6C_SYS_MOD_GYRO,
+    I6C_SYS_MOD_JPD,
+    I6C_SYS_MOD_ISP,
+    I6C_SYS_MOD_SCL,
+    I6C_SYS_MOD_WBC,
+    I6C_SYS_MOD_DSP,
+    I6C_SYS_MOD_PCIE,
+    I6C_SYS_MOD_DUMMY,
+    I6C_SYS_MOD_NIR,
+    I6C_SYS_MOD_DPU,
+    I6C_SYS_MOD_END,
+} i6c_sys_mod;
+
+typedef enum {
+    I6C_SYS_POOL_ENCODER_RING,
+    I6C_SYS_POOL_CHANNEL,
+    I6C_SYS_POOL_DEVICE,
+    I6C_SYS_POOL_OUTPUT,
+    I6C_SYS_POOL_DEVICE_RING
+} i6c_sys_pooltype;
+
+typedef struct {
+    i6c_sys_mod module;
+    unsigned int device;
+    unsigned int channel;
+    unsigned int port;
+} i6c_sys_bind;
+
+typedef struct {
+    i6c_sys_mod module;
+    unsigned int device;
+    unsigned int channel;
+    unsigned char heapName[32];
+    unsigned int heapSize;
+} i6c_sys_poolchn;
+
+typedef struct {
+    i6c_sys_mod module;
+    unsigned int device;
+    unsigned int reserved;
+    unsigned char heapName[32];
+    unsigned int heapSize;
+} i6c_sys_pooldev;
+
+typedef struct {
+    unsigned int ringSize;
+    unsigned char heapName[32];
+} i6c_sys_poolenc;
+
+typedef struct {
+    i6c_sys_mod module;
+    unsigned int device;
+    unsigned int channel;
+    unsigned int port;
+    unsigned char heapName[32];
+    unsigned int heapSize;
+} i6c_sys_poolout;
+
+typedef struct {
+    i6c_sys_mod module;
+    unsigned int device;
+    unsigned short maxWidth;
+    unsigned short maxHeight;
+    unsigned short ringLine;
+    unsigned char heapName[32];
+} i6c_sys_poolring;
+
+typedef struct {
+    i6c_sys_pooltype type;
+    char create;
+    union {
+        i6c_sys_poolchn channel;
+        i6c_sys_pooldev device;
+        i6c_sys_poolenc encode;
+        i6c_sys_poolout output;
+        i6c_sys_poolring ring;
+    } config;
+} i6c_sys_pool;
+
 typedef struct {
     unsigned char version[128];
-} i6c_sys_version;
+} i6c_sys_ver;
 
-_Static_assert(sizeof(i6c_sys_version) == 128,
-               "i6c_sys_version is the 128-byte buffer MI_SYS_GetVersion fills");
+/*
+ * Checked against the shipped libraries rather than taken on trust, per
+ * DERIVED.md:
+ *
+ *   i6c_sys_ver     MI_SYS_GetVersion loads #128 into the size slot of the
+ *                   block it hands to ioctl, so the buffer is 128 bytes.
+ *   i6c_sys_bind    MI_SYS_BindChnPort2 marshals 56 bytes, which is two of
+ *                   these plus the source and destination rates.
+ *   i6c_sys_mod     ISP at 33 and SCL at 34 match the module ids the
+ *                   libraries use.
+ *
+ * The SoC id every MI_SYS entry point leads with is 16 bits, and that is not an
+ * assumption either: MI_SYS_GetVersion stores its first argument with strh.w, a
+ * halfword store. MI 2.x has no equivalent argument, and dlsym resolves by name,
+ * so a table built for that generation binds against these libraries and then
+ * calls with a stray value where the id belongs, reporting nothing.
+ */
+_Static_assert(sizeof(i6c_sys_ver) == 128, "MI_SYS_GetVersion fills 128 bytes");
+_Static_assert(sizeof(i6c_sys_bind) == 16, "two of these plus two rates is the 56 BindChnPort2 marshals");
 
 #endif /* SIGMASTAR_I6C_SYS_H */
