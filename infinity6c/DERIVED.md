@@ -70,6 +70,36 @@ and getter above copies the caller's struct wholesale — `ldmia`/`stmia` or
 `memcpy` — and never touches a field, because the decoding happens on the other
 side of the ioctl. The sizes are real; the interiors are opaque here.
 
-The decoder is `mi.ko`. It is not in sigmastar-lib, which ships userspace
-libraries only, so getting field layouts means disassembling that module for the
-matching drop. That is the next lever, and it needs no hardware.
+The decoders are the per-module kernel objects, and they are not in
+sigmastar-lib, which ships userspace libraries only. They are in
+`johnchia/sigmastar-sdk` under
+
+    infinity6c/kmod-5.10.61-0907-uclibc-9.1.0/mi_{sys,vif,scl,sensor,vcodec}.ko
+
+matching this drop by the `0907` in the directory name. Use the uclibc set to
+match what the target runs, though kernel objects should not differ.
+
+## Those modules are unstripped, which is the real lever
+
+`mi_vif.ko` alone exports 2574 symbols, and they are named in a pattern that
+does the work for you:
+
+| symbol | what it gives |
+| --- | --- |
+| `MI_VIF_CHECK_DevAttr` | validates fields individually, so its loads are the offsets |
+| `MI_VIF_DEBUG_OnDumpDevAttr` | prints the struct through `MI_SYS_Proc_Print`, so format strings pair names with offsets |
+| `MI_VIF_IMPL_*` | the real implementation behind each entry point |
+
+Validation strings corroborate the field set independently — `IntfMode %d err`,
+`HdrType %d err`, `group %d, workmode %d invaild`, `Clkedge`, `Compress`,
+`incrop` — so a derived layout can be checked against what the module complains
+about rather than against a guess.
+
+Two practical notes. `objdump --disassemble=<sym>` misjudges function bounds on
+a relocatable object and dumps a section's worth of relocations; disassemble
+`.text` and cut the range instead. And read offsets from the `CHECK_` and
+`DEBUG_` functions rather than the `IMPL_` ones, which mostly pass structures
+onward.
+
+None of this needs hardware. What it needs is a careful pass per struct, which
+is the work the sizes above only set the boundary for.
