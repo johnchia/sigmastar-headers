@@ -103,3 +103,46 @@ onward.
 
 None of this needs hardware. What it needs is a careful pass per struct, which
 is the work the sizes above only set the boundary for.
+
+## VIF, from `MI_VIF_CHECK_*` in mi_vif.ko
+
+Offsets are the struct-relative loads; widths are the load instruction
+(`ldr`/`ldrh`/`ldrb`); bounds are the immediate each is compared against. Both
+maps close against the sizes derived from userspace, which is the useful check —
+the size and the offsets come from opposite sides of the ioctl and agree.
+
+`MI_VIF_GroupAttr_t`, 28 bytes, from `MI_VIF_CHECK_GroupAttr` (0x3490):
+
+| offset | width | bound |
+| --- | --- | --- |
+| 0 | 32 | < 5 |
+| 4 | 32 | < 2 |
+| 8 | 32 | < 4 |
+| 12 | 32 | < 2 |
+| 16, 20, 24 | — | not range-checked |
+
+The three unchecked tail words are consistent with a flag and a bitmask, which
+this function would have no bound to test.
+
+`MI_VIF_DevAttr_t`, 20 bytes, from `MI_VIF_CHECK_DevAttr` (0x3788):
+
+| offset | width | bound |
+| --- | --- | --- |
+| 0 | 32 | non-zero |
+| 4 | — | not read here |
+| 8 | 16 | — |
+| 10 | 16 | — |
+| 12 | 32 | < 3 |
+| 16 | 8 | < 1, so boolean |
+| — | | 3 bytes tail padding to 20 |
+
+Offsets 8 and 10 being adjacent halfwords, with 4 and 6 untouched, fits an
+8-byte rectangle at offset 4 whose width and height are validated and whose
+origin is not — `MI_SYS_WindowRect_t` is four halfwords. Stated as the reading
+it is, not as a fact: nothing here has confirmed 4 and 6 exist as separate
+fields.
+
+**These are offsets, not names.** Assigning names means correlating each failing
+branch with the format string it prints, which the module makes possible — it
+complains in terms of `IntfMode`, `HdrType`, `workmode` and `Clkedge` — but that
+correlation has not been done, so no struct is declared from this yet.
