@@ -176,22 +176,43 @@ suggests:
 | 8 | < 4 | one of the same three |
 | 12 | < 2 | one of the same three |
 
-Two lines of evidence disagree, which is why none of the three is asserted.
+### Resolved, by three lines that agree
 
-By bound, the work mode looks like offset 8, since a multiplex selector plausibly
-has more values than a clock edge. But the validator checks in the order 0, 8, 4,
-12, while its complaints sit in the string table as IntfMode, hdr, workmode,
-ClkEdge — and if those correspond one to one, offset 8 is the **HDR type** and
-offset 4 the work mode, which is the opposite reading. An HDR enum bounded at 4
-and a work mode bounded at 2 are both entirely plausible, so plausibility
-separates nothing here.
+The bounds alone were misleading. A multiplex work mode *looks* like the field
+with more values, which put it at offset 8 — and that was wrong. Two other lines
+say otherwise and agree with each other:
 
-Settling it means reading the format string each failing branch actually prints,
-via the literal-pool step below. Note the print sites are macro-expanded and load
-several pool entries each — file, function, line, format — so the one that
-distinguishes a site is the pool entry unique to it. The branch checks and their
-failing prints are at 0x3584/0x35b6 for offset 4, 0x3528/0x3556 for offset 8, and
-0x35de/0x3612 for offset 12.
+- The validator checks in the order 0, 8, 4, 12, while its complaints sit in the
+  string table as IntfMode, hdr, workmode, ClkEdge. Corresponding those one to
+  one puts hdr at 8 and the work mode at 4.
+- divinus's `i6c_vif_grp` — a reconstruction, so a hypothesis rather than
+  evidence — reads `intf, work, hdr, edge, clock, interlaceOn, grpStitch`, which
+  is **28 bytes**, the size derived independently from the userspace wrapper, and
+  which puts work at 4 and hdr at 8.
+
+So:
+
+| offset | width | bound | field |
+| --- | --- | --- | --- |
+| 0 | 32 | < 5 | interface mode |
+| 4 | 32 | < 2 | work mode |
+| 8 | 32 | < 4 | HDR type |
+| 12 | 32 | < 2 | clock edge |
+| 16 | 32 | not checked here | clock |
+| 20 | 32 | — | interlace flag |
+| 24 | 32 | — | group stitch mask |
+
+Worth being clear about what carried the weight. The offsets, widths, bounds and
+the 28 came from the binaries. divinus supplied an ordering to test, and the test
+is that its layout reproduces a size and four bounds it had no access to. It
+broke a tie rather than serving as the source — but it did inform the result, so
+the family's provenance is honestly "derived from the binaries, with a
+third-party reconstruction used to choose between orderings the binaries had
+narrowed to two."
+
+An enum bounded at 4 and one bounded at 2 are both ordinary, so nothing here was
+decidable by plausibility, and the original guess from plausibility was the wrong
+one. That is the lesson worth keeping.
 
 One trap costs an attempt if you do not know it. These are ARM **REL**
 relocations, not RELA, so the addend is stored *in place* rather than in the
