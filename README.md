@@ -12,6 +12,17 @@ the same layout convention.
 | directory | chips | MI series |
 | --- | --- | --- |
 | `infinity6e` | SSC30KQ, SSC336Q, SSC338Q, SSC339G | 0xF1 |
+| `infinity6c` | SSC377, SSC378, SSC379 | MI 3.0 |
+
+`infinity6b0` (SSC333/335/337) has no directory of its own: it is the same MI
+generation as `infinity6e` and consumers point it at that family.
+
+`infinity6c` is a different generation and shares no layout with either, even
+where a function signature is unchanged. Its whole module surface leads with
+arguments MI 2.x does not have — a SoC id on MI_SYS and MI_RGN, a device on
+MI_VENC — and `dlsym` resolves by name, so a consumer that reuses MI 2.x
+declarations here links cleanly and then calls with the wrong argument list.
+Nothing reports it.
 
 ## These are reconstructions, not vendor headers
 
@@ -29,6 +40,22 @@ multi-chip HALs that carry MI 3.0 fields into MI 2.x structs — agreement
 between them is a hypothesis, not evidence.
 
 Names and field order follow divinus so fixes stay diffable against upstream.
+
+### Except `infinity6c`, which is written from the vendor interface
+
+That paragraph describes `infinity6e` and the constraint it was written under.
+`infinity6c` is not under it. The Infinity6C SDK drop is available, and its
+prebuilt MI libraries are byte-identical to the ones the target ships — same
+`project_commit`, `sdk_commit` and `mhal_commit`, confirmed by md5 across all
+63 libraries in both C library variants — so the vendor's own `mi_*.h` can be
+read directly instead of a layout being inferred from a binary.
+
+So this family is written from that interface and expressed independently: no
+third-party transcription is copied into it, and names follow the vendor rather
+than divinus, because the vendor is what it will be checked against. Anything
+added here should be too. Cite the vendor header, and keep the
+`_Static_assert`s — matched provenance makes a layout likely to be right, not
+certain, and the sizes remain the thing worth proving.
 
 ## Declarations only
 
