@@ -60,6 +60,9 @@ Read the frame rather than pattern-matching it.
 | `MI_VENC_Stream_t` | 84 | 8 (dev, chn) + 4 (timeout) | **72** |
 | `MI_VIF_OutputPortAttr_t` | 32 | 8 (dev, port) | **24** |
 | `MI_SCL_ChnParam_t` | 12 | 8 (dev, chn) | **4** |
+| `MI_ISP_ChannelAttr_t` | 88 | 8 (dev, chn) | **80** |
+| `MI_ISP_ChnParam_t` | 28 | 8 (dev, chn) | **20** |
+| `MI_ISP_OutputPortParam_t` | 32 | 12 (dev, chn, port) | **20** |
 
 All twelve have been checked against divinus's vendored layouts, compiled for the
 32-bit ARM target, and **all twelve agree** — `i6c_sys_ver` 128, `i6c_vif_grp` 28,
@@ -70,8 +73,8 @@ spelling out, since an earlier revision here recorded it as having no counterpar
 at all: divinus passes a bare `int *` rather than a struct, so it corroborates the
 one-word payload without naming a type. Two more that no payload reaches,
 `i6c_venc_pack` 184 and `i6c_venc_packinfo` 16, come from array strides instead,
-below. The assertions live in the headers themselves, so the check runs
-on every build rather than once.
+below. The three ISP layouts are in their own section further down. The assertions
+live in the headers themselves, so the check runs on every build rather than once.
 
 **The id-word column used to be an argument count, and is now a reading.** Every
 module's ioctl thunk splits the payload before calling the `IMPL` body, so the
@@ -493,3 +496,76 @@ equivalent found nothing. Read for what it is, it corroborates the derivation
 exactly: one word, and that word is the rotation. Wrapping it in a struct is this
 repository's choice, made so the family reads uniformly and so a later member can
 be appended without changing the call.
+
+## ISP, from `mi_isp.ko` — the most forthcoming module of the set
+
+The ISP is where this generation diverges hardest from MI 2.x: a stage with its own
+device, channel and output ports, sitting between VIF and SCL, where MI 2.x folds
+the same work into VPE as tuning calls. So none of these three layouts has an MI 2.x
+counterpart to be sanity-checked against, and all three were derived rather than
+adapted.
+
+They also turned out to be the easiest in the family, because the module names its
+own fields. Every member below is anchored to a string or a platform predicate in
+`mi_isp.ko`, not inferred from a gap.
+
+**`MI_ISP_ChannelAttr_t`, 80 bytes.** `MI_ISP_IMPL_CreateChannel` prints
+
+    Dev%d, chn%d, sensorbindid %d, sync3a %d, ispinit version %d, size %d
+
+and marshals those four struct arguments, in that order, from offsets **0, 76, 4
+and 8**. That settles more than the field names. The version block starts at 4 as a
+revision followed by a length, and `sync3a` sitting at 76 is what fixes the block's
+payload at 64 bytes — 4 + 4 + 4 + 64 lands exactly on 76, with the 80 the ioctl
+reports leaving room for nothing else. A nested array's length is normally the
+hardest thing to reach from outside; here a neighbour's offset gives it away.
+
+**`MI_ISP_ChnParam_t`, 20 bytes.** `MI_ISP_CHECK_ChnParamValid` is the pattern this
+document keeps hoping for: it bounds each field and then hands it to the platform
+predicate that names it.
+
+| offset | width | bound | predicate |
+| --- | --- | --- | --- |
+| 0 | word | ≤ 4 | `MI_ISP_PLATFORM_SupportHdr` |
+| 4 | word | ≤ 7 | `MI_ISP_PLATFORM_Support3DNR` |
+| 8 | byte | ≤ 1 | `MI_ISP_PLATFORM_SupportMirror` |
+| 9 | byte | ≤ 1 | `MI_ISP_PLATFORM_SupportFlip` |
+| 12 | word | ≤ 3 | `MI_ISP_PLATFORM_SupportRot` |
+
+Two of those bounds are independent confirmations rather than new facts. The ≤ 4 at
+offset 0 is exactly the five values `i6c_common_hdr` declares, and the ≤ 7 at offset
+4 reproduces upstream's bare comment "Accepts values from 0-7" — which divinus states
+with no derivation behind it, and which the module now backs. A final call passes
+offsets 4, 9 and 12 together into `RotFlipRelyOn3Dnr`, naming three at once, and
+offset 16 is the only member left in a 20-byte struct.
+
+**`MI_ISP_OutputPortParam_t`, 20 bytes.** `MI_ISP_IMPL_SetOutputPortParam` prints
+
+    dev %d, chn %d, port%d, croprect(%d,%d,%d,%d), pixel %d Compress %d, layout %d
+
+from four halfwords at 0, 2, 4 and 6 and words at 8, 12 and **16**.
+
+That last one is the one loose end in the family. It is read with `ldr`, a full
+word, against upstream's `char multiPlanes` — and the print is the only read of
+offset 16 anywhere in the module, so there is nothing to break the tie. It does not
+move the size: a `char` there carries three bytes of tail padding either way. The
+name is kept as upstream and the ambiguity is recorded at the declaration.
+
+The practical consequence is a rule rather than a question. **Clear these structs
+before filling them.** If the driver reads a word where a caller wrote a byte, the
+upper three bytes are whatever the stack held — and unlike a size error, that
+misbehaves intermittently. divinus `memset`s this struct before use, which is
+probably why the ambiguity never surfaced there.
+
+### Where the ISP entry points hide the SoC id
+
+Worth recording next to the layouts, because it is an arity trap of the kind this
+family specialises in. `MI_ISP_EnableOutputPort` opens with
+
+    mov.w ip, r0, lsr #16
+    strh.w ip, [sp, #16]
+
+so the SoC id is not a separate argument here as it is on MI_SYS and MI_RGN — it
+rides in the **high halfword of the device argument** and the wrapper shifts it out.
+On a single-die part both halves are zero and the distinction is invisible, which is
+exactly what makes it worth writing down.
