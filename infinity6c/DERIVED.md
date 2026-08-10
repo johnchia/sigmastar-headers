@@ -162,23 +162,36 @@ group %d, ClkEdge %d invaild
 ```
 
 So `GroupAttr` carries an interface mode, an HDR type, a work mode and a clock
-edge, and the four bounds-checked words are those four. Two can be placed with
-confidence, because the bound identifies them:
+edge, and the four bounds-checked words are those four. **Only the first is
+placed.** Offset 0 is the interface mode: it is checked first and its bound of 5
+is the only one that fits an interface enum.
+
+The other three are open, and the uncertainty is wider than a first look
+suggests:
 
 | offset | bound | field |
 | --- | --- | --- |
-| 0 | < 5 | interface mode — checked first, and the only field with that many values |
-| 8 | < 4 | work mode — the multiplex selector |
-| 4 | < 2 | **either** HDR type **or** clock edge |
-| 12 | < 2 | the other of those two |
+| 0 | < 5 | interface mode |
+| 4 | < 2 | one of: HDR type, work mode, clock edge |
+| 8 | < 4 | one of the same three |
+| 12 | < 2 | one of the same three |
 
-**Offsets 4 and 12 are genuinely ambiguous** and are left that way deliberately.
-Both are bounded at 2, so the bound cannot separate them, and the validator does
-not read fields in ascending order — it takes 0, 8, 4, 12 — so position in the
-string table cannot either. Settling it means reading which branch reaches
-`hdr %d invaild` and which reaches `ClkEdge %d invaild`, via the literal-pool
-step below. Guessing would swap two enums that are both small and both plausible
-in either slot, and nothing downstream would fail loudly.
+Two lines of evidence disagree, which is why none of the three is asserted.
+
+By bound, the work mode looks like offset 8, since a multiplex selector plausibly
+has more values than a clock edge. But the validator checks in the order 0, 8, 4,
+12, while its complaints sit in the string table as IntfMode, hdr, workmode,
+ClkEdge — and if those correspond one to one, offset 8 is the **HDR type** and
+offset 4 the work mode, which is the opposite reading. An HDR enum bounded at 4
+and a work mode bounded at 2 are both entirely plausible, so plausibility
+separates nothing here.
+
+Settling it means reading the format string each failing branch actually prints,
+via the literal-pool step below. Note the print sites are macro-expanded and load
+several pool entries each — file, function, line, format — so the one that
+distinguishes a site is the pool entry unique to it. The branch checks and their
+failing prints are at 0x3584/0x35b6 for offset 4, 0x3528/0x3556 for offset 8, and
+0x35de/0x3612 for offset 12.
 
 One trap costs an attempt if you do not know it. These are ARM **REL**
 relocations, not RELA, so the addend is stored *in place* rather than in the
