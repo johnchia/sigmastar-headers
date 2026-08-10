@@ -70,22 +70,31 @@ immediate it compares against gives the valid range.
 ways the method misleads. Two worth knowing before trusting a number. The size
 slot describes the *marshalled block* rather than the struct, so the device and
 channel ids a call prepends have to be subtracted — `MI_VIF_SetDevAttr` reports 24
-and copies 20. And the slot is not at a fixed offset in the frame: it is at
-`[sp, #4]` for SYS, VIF, SNR and SCL but `[sp, #28]` for `MI_VENC_CreateChn`, so a
-script that pattern-matches the offset reports whatever else lives there. Read the
-size out of the ioctl command word's `_IOC` field instead, which needs no
-assumption about the frame.
+and copies 20, and the module's own ioctl thunks show where that boundary falls
+rather than leaving the ids to be counted. And the slot is not at a fixed offset in
+the frame: it is at `[sp, #4]` for SYS, VIF, SNR and SCL but `[sp, #28]` for
+`MI_VENC_CreateChn`, so a script that pattern-matches the offset reports whatever
+else lives there. Read the size out of the ioctl command word's `_IOC` field
+instead, which needs no assumption about the frame.
 
-Two layouts have had their field *order* checked and not merely their size, and
-between them they make the case for checking rather than trusting either source.
-The VIF group attribute's size and four field bounds came out of the binaries,
-divinus supplied the order, and divinus's ordering reproduced bounds it had no
-access to — where an earlier guess from the bounds alone had two of those fields
-the wrong way round. The VENC channel attribute went further: the driver rewrites
-just the fields a running channel may change before re-comparing, and the offsets
-it rewrites land on the right fields in *both* union arms, including the MJPG arm
-where the absence of a profile field shifts width and height four bytes earlier.
-Sizes cannot show that, since permuting same-width members preserves a total.
+Not everything is marshalled, and those are not out of reach either. `MI_VENC`
+hands back an array of packets the caller owns, so nothing crosses the ioctl
+boundary — but the library indexes that array, and a stride is a size. The same
+trick fixes the packet-info entries nested inside it.
+
+Several layouts have had their field *order* checked and not merely their size, and
+they make the case for checking rather than trusting either source. The VIF group
+attribute's size and four field bounds came out of the binaries, divinus supplied
+the order, and divinus's ordering reproduced bounds it had no access to — where an
+earlier guess from the bounds alone had two of those fields the wrong way round.
+The VENC structs went further, because unions make order testable. The driver
+rewrites just the fields a running channel may change before re-comparing a
+channel attribute, and the offsets it rewrites land on the right fields in *both*
+arms — including the MJPG arm, where the absence of a profile field shifts width
+and height four bytes earlier. The stream-info union does the same from the other
+side: one reference-type value is written at two different offsets depending on
+codec, and the gap between them is exactly how much longer the H264 arm is. Sizes
+cannot show any of that, since permuting same-width members preserves a total.
 
 ## The assertions are 32-bit facts
 
