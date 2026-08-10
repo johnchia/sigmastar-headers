@@ -147,6 +147,39 @@ branch with the format string it prints, which the module makes possible — it
 complains in terms of `IntfMode`, `HdrType`, `workmode` and `Clkedge` — but that
 correlation has not been done, so no struct is declared from this yet.
 
+### Naming, as far as the strings take it
+
+`.rodata.str1.1` holds the validator's complaints in source order, and the group
+block is contiguous:
+
+```
+intface %d not support
+group %d, IntfMode %d invaild
+eHDRType %d not support
+group %d, hdr %d invaild
+group %d, workmode %d invaild
+group %d, ClkEdge %d invaild
+```
+
+So `GroupAttr` carries an interface mode, an HDR type, a work mode and a clock
+edge, and the four bounds-checked words are those four. Two can be placed with
+confidence, because the bound identifies them:
+
+| offset | bound | field |
+| --- | --- | --- |
+| 0 | < 5 | interface mode — checked first, and the only field with that many values |
+| 8 | < 4 | work mode — the multiplex selector |
+| 4 | < 2 | **either** HDR type **or** clock edge |
+| 12 | < 2 | the other of those two |
+
+**Offsets 4 and 12 are genuinely ambiguous** and are left that way deliberately.
+Both are bounded at 2, so the bound cannot separate them, and the validator does
+not read fields in ascending order — it takes 0, 8, 4, 12 — so position in the
+string table cannot either. Settling it means reading which branch reaches
+`hdr %d invaild` and which reaches `ClkEdge %d invaild`, via the literal-pool
+step below. Guessing would swap two enums that are both small and both plausible
+in either slot, and nothing downstream would fail loudly.
+
 One trap costs an attempt if you do not know it. These are ARM **REL**
 relocations, not RELA, so the addend is stored *in place* rather than in the
 relocation entry. `objdump -r` therefore shows only
