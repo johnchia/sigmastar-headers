@@ -41,21 +41,30 @@ between them is a hypothesis, not evidence.
 
 Names and field order follow divinus so fixes stay diffable against upstream.
 
-### Except `infinity6c`, which is written from the vendor interface
+### `infinity6c` is derived the same way, but not from divinus
 
-That paragraph describes `infinity6e` and the constraint it was written under.
-`infinity6c` is not under it. The Infinity6C SDK drop is available, and its
-prebuilt MI libraries are byte-identical to the ones the target ships — same
-`project_commit`, `sdk_commit` and `mhal_commit`, confirmed by md5 across all
-63 libraries in both C library variants — so the vendor's own `mi_*.h` can be
-read directly instead of a layout being inferred from a binary.
+Same method — the ABI of prebuilt vendor libraries — and no third-party
+transcription. There is no divinus i6c reconstruction in it to stay diffable
+against, so names follow the vendor's own API rather than divinus's.
 
-So this family is written from that interface and expressed independently: no
-third-party transcription is copied into it, and names follow the vendor rather
-than divinus, because the vendor is what it will be checked against. Anything
-added here should be too. Cite the vendor header, and keep the
-`_Static_assert`s — matched provenance makes a layout likely to be right, not
-certain, and the sizes remain the thing worth proving.
+MI marshals through an ioctl, which makes these libraries unusually
+forthcoming. Each userspace wrapper writes the size of the payload it is about
+to hand over into its argument block as a literal, so a struct size can be read
+straight off the disassembly:
+
+```
+$ arm-linux-*-objdump -d --disassemble=MI_SYS_GetVersion libmi_sys.so
+  movs r3, #128        @ payload size
+  str  r3, [sp, #4]    @ into the size slot of the ioctl block
+```
+
+Two cautions, both learned here. The size slot holds the size of the
+*marshalled block*, which equals the struct only for single-struct setters —
+`MI_SYS_BindChnPort2` reports 56 because it packs two channel ports plus rates.
+And the immediate is not always a size at all: `MI_VENC_CreateChn` yields 295,
+which is not even 4-aligned. Confirm each number against the field
+loads and stores in the same function before believing it, and keep the
+`_Static_assert`s.
 
 ## Declarations only
 

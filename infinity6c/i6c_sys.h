@@ -1,19 +1,18 @@
 /*
  * i6c_sys.h -- SigmaStar MI_SYS types, Infinity6C
  *
- * Written from the vendor SDK's own mi_sys.h and mi_sys_datatype.h for the
- * release the target's libraries were built from, and expressed
- * independently: the names, grouping and commentary here are this
- * repository's, and no third-party transcription was copied into them.
+ * Derived from the ABI of the prebuilt MI libraries the target ships, the same
+ * method the infinity6e family used, and expressed independently -- the names,
+ * grouping and commentary here are this repository's, and no third-party
+ * transcription was copied into them. Nothing in this family reproduces vendor
+ * source.
  *
- * That is possible for this family and was not for infinity6e. The Infinity6C
- * SDK drop is available, and its prebuilt MI libraries are byte-identical to
- * the ones the target ships -- same project, sdk and mhal commits -- so the
- * vendor interface can be read directly rather than inferred from a HAL that
- * had to work it out from a binary. Where the infinity6e headers next door
- * follow divinus's names to stay diffable against upstream, this family
- * follows the vendor's, because the vendor is what it will be checked
- * against.
+ * MI marshals through an ioctl, which makes the binary unusually forthcoming:
+ * each userspace wrapper writes the payload size into its argument block as a
+ * literal, so a size can be read off the disassembly rather than guessed. Both
+ * facts below came out that way, and either can be re-derived with
+ *
+ *     arm-linux-*-objdump -d --disassemble=MI_SYS_GetVersion libmi_sys.so
  *
  * Layouts are pinned by _Static_assert rather than trusted. A wrong one
  * corrupts memory instead of failing to compile, which is the failure this
@@ -22,11 +21,9 @@
  * THE CALLING CONVENTION CHANGED, AND IT IS INVISIBLE
  *
  * Every MI_SYS entry point on this generation leads with a 16-bit SoC id that
- * MI 2.x has no equivalent of:
- *
- *     MI_SYS_Init(MI_U16 u16SocId)
- *     MI_SYS_GetVersion(MI_U16 u16SocId, MI_SYS_Version_t *)
- *     MI_SYS_BindChnPort2(MI_U16 u16SocId, src, dst, srcFps, dstFps)
+ * MI 2.x has no equivalent of. Its width is not an assumption:
+ * MI_SYS_GetVersion stores the first argument with strh.w, a halfword store,
+ * so the parameter is 16 bits wide and not a promoted int.
  *
  * It selects a die on a multi-die part and is 0 on a single-die camera.
  * Nothing catches getting this wrong. The libraries are reached through
@@ -57,7 +54,10 @@
  * Not guaranteed NUL-terminated, so read it bounded by the array rather than
  * with the string functions. Worth reading rather than skipping: build_time is
  * what confirms the loaded libraries are the drop a consumer's declarations
- * were written against.
+ * were derived from.
+ *
+ * The 128 is the library's own number, not a convention: MI_SYS_GetVersion
+ * loads #128 into the size slot of the block it hands to ioctl.
  */
 typedef struct {
     unsigned char version[128];
