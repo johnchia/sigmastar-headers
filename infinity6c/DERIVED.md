@@ -25,9 +25,11 @@ prepend their device, channel and port ids to the payload, so the struct is the
 remainder. Read the copy that follows — `ldmia`/`stmia` pairs, or a `memcpy`
 with a literal length — and subtract.
 
-**The immediate is not always a size.** `MI_VENC_CreateChn` yields 295, which is
-not 4-aligned and cannot be a struct length. Confirm every number against the
-copy in the same function before believing it.
+**The size slot is not always at `[sp, #4]`.** That offset holds for SYS, VIF,
+SNR and SCL, but VENC builds a larger frame and puts it at `[sp, #28]`. A script
+that assumes the offset reports whatever happens to live there — this is where
+the "295" in an earlier revision of these notes came from. It was never a size.
+Read the frame rather than pattern-matching it.
 
 ## Sizes established this way
 
@@ -53,8 +55,36 @@ right order, since permuting same-width members preserves the total. Only
 `MI_VIF_CHECK_GroupAttr`. For the others, size is necessary and not sufficient.
 
 Not yet decomposed: `MI_VIF_OutputPortAttr_t` (payload 32, id words not yet
-counted), `MI_SCL_ChnParam_t` (`MI_SCL_SetChnParam` has no matching size slot,
-so it is shaped differently), and everything in VENC.
+counted) and `MI_SCL_ChnParam_t` (`MI_SCL_SetChnParam` has no matching size slot,
+so it is shaped differently).
+
+## VENC disagrees, and divinus is the one that is wrong
+
+`MI_VENC_CreateChn` marshals **84** bytes and `memcpy`s **76** of them; the
+difference is the device and channel ids it prepends. So `MI_VENC_ChnAttr_t` is
+**76 bytes**.
+
+    3a3c:  movs r2, #76      @ memcpy length -- the struct
+    3a44:  blx  memcpy
+    3a4a:  movs r1, #84      @ payload size ...
+    3a52:  str  r1, [sp, #28] @ ... into VENC's size slot
+
+divinus's `i6c_venc_chn` is **80**. It is `{ i6c_venc_attrib, i6c_venc_rate }`,
+which measure 40 and 40, and one of them is four bytes too large.
+
+**No assertion is added for this yet, deliberately** — a failing `_Static_assert`
+would break every consumer's build over a defect in one struct nobody has
+finished diagnosing. It is written down here instead, and `i6c_venc.h` carries the
+warning at the declaration.
+
+Which of the two is wrong is not yet established. `i6c_venc_attrib` is a codec
+enum plus a union whose largest arm (`attr_h26x`) is 36, giving 40 with no slack.
+`i6c_venc_rate` is a mode enum plus a union whose largest arm (`h26xvbr`) is 28,
+which should give 32 rather than 40 — so `i6c_venc_rate` is the one to look at
+first, and its union arms are where the extra words most likely are.
+
+This is the validation earning its keep. VENC is the largest surface in the
+family, and the first number checked against it did not match.
 
 `MI_SYS_BindChnPort2` reports 56 and is not one struct: it packs two channel
 ports plus the source and destination rates.

@@ -317,4 +317,24 @@ typedef struct {
     };
 } i6c_venc_strm;
 
+/*
+ * UNVALIDATED, AND KNOWN WRONG IN AT LEAST ONE PLACE.
+ *
+ * MI_VENC_CreateChn marshals 84 bytes and memcpys 76 of them, the difference
+ * being the device and channel ids it prepends -- so MI_VENC_ChnAttr_t is 76
+ * bytes. i6c_venc_chn below is 80, and is { i6c_venc_attrib, i6c_venc_rate }
+ * at 40 each, so one of those two is four bytes too large.
+ *
+ * i6c_venc_rate is the likelier: it is a mode enum plus a union whose largest
+ * arm is 28, which should total 32. i6c_venc_attrib's largest arm is 36, which
+ * totals 40 with no slack.
+ *
+ * No _Static_assert here on purpose. Asserting 76 would fail the build for every
+ * consumer over one struct, before anyone has established which member is at
+ * fault -- and guessing at a fix is how a wrong layout gets blessed. Nothing
+ * else in this header has been checked against the libraries at all.
+ *
+ * See DERIVED.md.
+ */
+
 #endif /* SIGMASTAR_I6C_VENC_H */
