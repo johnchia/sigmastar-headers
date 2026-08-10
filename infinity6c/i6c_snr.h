@@ -104,4 +104,10 @@ typedef struct {
     char desc[32];
 } __attribute__((packed, aligned(4))) i6c_snr_res;
 
+/*
+ * MI_SNR_GetPlaneInfo marshals 80 bytes, less two 4-byte ids for the pad and the
+ * plane. Size only -- nothing has checked this one's field order. See DERIVED.md.
+ */
+_Static_assert(sizeof(i6c_snr_plane) == 72, "MI_SNR_GetPlaneInfo marshals 80 less pad and plane ids");
+
 #endif /* SIGMASTAR_I6C_SNR_H */

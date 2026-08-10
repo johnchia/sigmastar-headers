@@ -78,4 +78,20 @@ typedef struct {
     i6c_common_compr compress;
 } i6c_vif_port;
 
+/*
+ * Sizes checked against the shipped libraries, not taken on trust. Each
+ * userspace wrapper writes its marshalled payload size into the ioctl block as a
+ * literal; subtract the ids the call prepends and the remainder is the struct.
+ *
+ *   i6c_vif_grp   MI_VIF_CreateDevGroup marshals 32, less a 4-byte group id
+ *   i6c_vif_dev   MI_VIF_SetDevAttr     marshals 24, less a 4-byte device id
+ *
+ * The group's field order is checked too, which size alone cannot do:
+ * MI_VIF_CHECK_GroupAttr in mi_vif.ko bounds offset 0 below 5, 4 below 2, 8
+ * below 4 and 12 below 2, which is the interface mode, work mode, HDR type and
+ * clock edge in that order. See DERIVED.md.
+ */
+_Static_assert(sizeof(i6c_vif_grp) == 28, "MI_VIF_CreateDevGroup marshals 32 less a group id");
+_Static_assert(sizeof(i6c_vif_dev) == 20, "MI_VIF_SetDevAttr marshals 24 less a device id");
+
 #endif /* SIGMASTAR_I6C_VIF_H */

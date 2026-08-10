@@ -39,6 +39,19 @@ copy in the same function before believing it.
 | `MI_SNR_PlaneInfo_t` | 80 | 8 (pad, plane) | **72** |
 | `MI_SCL_OutputPortParam_t` | 36 | 12 (dev, chn, port) | **24** |
 
+All five have now been checked against divinus's vendored layouts, compiled for
+the 32-bit ARM target, and **all five agree** — `i6c_sys_ver` 128,
+`i6c_sys_bind` 16 (two of which plus two rates is BindChnPort2's 56),
+`i6c_vif_grp` 28, `i6c_vif_dev` 20, `i6c_snr_plane` 72, `i6c_scl_port` 24. The
+assertions live in the headers themselves, so the check runs on every build
+rather than once.
+
+Worth being exact about what that proves. A matching size says the field *set* is
+right and nothing is missing or spurious; it does not say the fields are in the
+right order, since permuting same-width members preserves the total. Only
+`i6c_vif_grp` has had its order checked, via the bounds in
+`MI_VIF_CHECK_GroupAttr`. For the others, size is necessary and not sufficient.
+
 Not yet decomposed: `MI_VIF_OutputPortAttr_t` (payload 32, id words not yet
 counted), `MI_SCL_ChnParam_t` (`MI_SCL_SetChnParam` has no matching size slot,
 so it is shaped differently), and everything in VENC.

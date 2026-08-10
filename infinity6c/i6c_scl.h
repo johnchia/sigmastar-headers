@@ -49,4 +49,10 @@ typedef struct {
     i6c_common_compr compress;
 } i6c_scl_port;
 
+/*
+ * MI_SCL_SetOutputPortParam marshals 36 bytes, less three 4-byte ids for the
+ * device, channel and port. Size only -- field order unchecked. See DERIVED.md.
+ */
+_Static_assert(sizeof(i6c_scl_port) == 24, "MI_SCL_SetOutputPortParam marshals 36 less three ids");
+
 #endif /* SIGMASTAR_I6C_SCL_H */
