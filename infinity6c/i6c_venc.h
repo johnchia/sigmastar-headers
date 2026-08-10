@@ -318,23 +318,37 @@ typedef struct {
 } i6c_venc_strm;
 
 /*
- * UNVALIDATED, AND KNOWN WRONG IN AT LEAST ONE PLACE.
+ * MI_VENC_ChnAttr_t is checked against mi_venc.ko rather than taken on trust,
+ * per DERIVED.md, and both halves come out as divinus has them.
  *
- * MI_VENC_CreateChn marshals 84 bytes and memcpys 76 of them, the difference
- * being the device and channel ids it prepends -- so MI_VENC_ChnAttr_t is 76
- * bytes. i6c_venc_chn below is 80, and is { i6c_venc_attrib, i6c_venc_rate }
- * at 40 each, so one of those two is four bytes too large.
+ * MI_VENC_IMPL_SetChnAttr copies the incoming attribute in two pieces and
+ * memcmps each against the channel context's own copy, which fixes both halves'
+ * sizes and the boundary between them: 40 bytes from offset 0, then 36 from
+ * offset 40. _MI_VENC_IMPL_ConfigRcAttr agrees, reaching the rate half by adding
+ * 40 to the whole attribute it is handed. The 76 that makes is what
+ * MI_VENC_CreateChn marshals.
  *
- * i6c_venc_rate is the likelier: it is a mode enum plus a union whose largest
- * arm is 28, which should total 32. i6c_venc_attrib's largest arm is 36, which
- * totals 40 with no slack.
+ * The interior offsets fall out of the same comparison. A change to the codec
+ * half is refused unless it is confined to resolution and profile, which the
+ * driver overwrites with the channel's current values before comparing -- at
+ * offsets 16, 24 and 28 for H264 and H265, and at 20 and 24 for MJPG. That
+ * reproduces both union arms, MJPG included: it has no profile field, so its
+ * width and height sit four bytes earlier than H26x's.
  *
- * No _Static_assert here on purpose. Asserting 76 would fail the build for every
- * consumer over one struct, before anyone has established which member is at
- * fault -- and guessing at a fix is how a wrong layout gets blessed. Nothing
- * else in this header has been checked against the libraries at all.
+ * Nothing below i6c_venc_chn has been checked against the libraries.
  *
- * See DERIVED.md.
+ * These sizes are the 32-bit target ABI, and i6c_venc_rate ends in a pointer, so
+ * a host compiler measures it four bytes over and none of the totals here hold.
+ * Compile the asserts with the cross compiler; see the README.
  */
+_Static_assert(sizeof(i6c_venc_attrib) == 40, "MI_VENC_Attr_t is the 40 bytes SetChnAttr compares");
+_Static_assert(sizeof(i6c_venc_rate) == 36, "MI_VENC_RcAttr_t is the 36 bytes SetChnAttr compares");
+_Static_assert(sizeof(i6c_venc_chn) == 76, "MI_VENC_ChnAttr_t is 76 bytes");
+_Static_assert(offsetof(i6c_venc_chn, rate) == 40, "the rate half starts where ConfigRcAttr looks for it");
+_Static_assert(offsetof(i6c_venc_attrib, h264.profile) == 16, "H26x profile is one of the masked fields");
+_Static_assert(offsetof(i6c_venc_attrib, h264.width) == 24, "H26x width is one of the masked fields");
+_Static_assert(offsetof(i6c_venc_attrib, h264.height) == 28, "H26x height is one of the masked fields");
+_Static_assert(offsetof(i6c_venc_attrib, mjpg.width) == 20, "MJPG width is one of the masked fields");
+_Static_assert(offsetof(i6c_venc_attrib, mjpg.height) == 24, "MJPG height is one of the masked fields");
 
 #endif /* SIGMASTAR_I6C_VENC_H */

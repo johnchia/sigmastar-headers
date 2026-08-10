@@ -53,25 +53,31 @@ Read the frame rather than pattern-matching it.
 | `MI_VIF_DevAttr_t` | 24 | 4 (dev) | **20** |
 | `MI_SNR_PlaneInfo_t` | 80 | 8 (pad, plane) | **72** |
 | `MI_SCL_OutputPortParam_t` | 36 | 12 (dev, chn, port) | **24** |
+| `MI_VENC_ChnAttr_t` | 84 | 8 (dev, chn) | **76** |
 
-All five have now been checked against divinus's vendored layouts, compiled for
-the 32-bit ARM target, and **all five agree** — `i6c_sys_ver` 128,
+All six have now been checked against divinus's vendored layouts, compiled for
+the 32-bit ARM target, and **all six agree** — `i6c_sys_ver` 128,
 `i6c_sys_bind` 16 (two of which plus two rates is BindChnPort2's 56),
-`i6c_vif_grp` 28, `i6c_vif_dev` 20, `i6c_snr_plane` 72, `i6c_scl_port` 24. The
-assertions live in the headers themselves, so the check runs on every build
-rather than once.
+`i6c_vif_grp` 28, `i6c_vif_dev` 20, `i6c_snr_plane` 72, `i6c_scl_port` 24,
+`i6c_venc_chn` 76. The assertions live in the headers themselves, so the check
+runs on every build rather than once.
 
 Worth being exact about what that proves. A matching size says the field *set* is
 right and nothing is missing or spurious; it does not say the fields are in the
-right order, since permuting same-width members preserves the total. Only
-`i6c_vif_grp` has had its order checked, via the bounds in
-`MI_VIF_CHECK_GroupAttr`. For the others, size is necessary and not sufficient.
+right order, since permuting same-width members preserves the total. Two have had
+their order checked as well: `i6c_vif_grp` via the bounds in
+`MI_VIF_CHECK_GroupAttr`, and `i6c_venc_chn` via the fields
+`MI_VENC_IMPL_SetChnAttr` excludes from its comparison. For the rest, size is
+necessary and not sufficient.
+
+Absent from the table because it is not one struct: `MI_SYS_BindChnPort2` reports
+56, which is two channel ports plus the source and destination rates.
 
 Not yet decomposed: `MI_VIF_OutputPortAttr_t` (payload 32, id words not yet
 counted) and `MI_SCL_ChnParam_t` (`MI_SCL_SetChnParam` has no matching size slot,
 so it is shaped differently).
 
-## VENC disagrees, and divinus is the one that is wrong
+## VENC, and the one trap that is in the measuring rather than the binary
 
 `MI_VENC_CreateChn` marshals **84** bytes and `memcpy`s **76** of them; the
 difference is the device and channel ids it prepends. So `MI_VENC_ChnAttr_t` is
@@ -86,59 +92,81 @@ Confirmed twice over: `MI_VENC_SetChnAttr` marshals the same 84 and copies the
 same 76 from a different frame layout, and both calls' `_IOC` size fields read
 0x4054, i.e. 84.
 
-divinus's `i6c_venc_chn` is **80**. It is `{ i6c_venc_attrib, i6c_venc_rate }`,
-which measure 40 and 40, and one of them is four bytes too large.
+**Measure the target ABI with the cross compiler.** divinus's `i6c_venc_chn`
+measures 80 on an x86-64 host and 76 on the 32-bit ARM target, because
+`i6c_venc_rate` ends in a `void *`: eight bytes on LP64, and the trailing padding
+that pointer's alignment adds. A host `sizeof` therefore reported a four-byte
+disagreement with the binaries that does not exist. This is the only trap here
+that lives in the method rather than in the artifact, and it is the easiest one to
+repeat, since nothing about it looks like a cross-compilation question. Four of
+the nine `infinity6e` headers already fail to compile for a 64-bit host for the
+same reason — their assertions are 32-bit facts.
 
-**No assertion is added for this yet, deliberately** — a failing `_Static_assert`
-would break every consumer's build over a defect in one struct nobody has
-finished diagnosing. It is written down here instead, and `i6c_venc.h` carries the
-warning at the declaration.
+### The driver confirms both halves and the boundary between them
 
-Which of the two is wrong is not yet established. `i6c_venc_attrib` is a codec
-enum plus a union whose largest arm (`attr_h26x`) is 36, giving 40 with no slack.
-`i6c_venc_rate` is a mode enum plus a union whose largest arm (`h26xvbr`) is 28,
-which should give 32 rather than 40 — so `i6c_venc_rate` is the one to look at
-first, and its union arms are where the extra words most likely are.
+`MI_VENC_IMPL_SetChnAttr` in `mi_venc.ko` compares the incoming attribute against
+the channel context's copy in two pieces, which pins each half's size and where
+the split falls:
 
-### The four bytes are not localized yet
-
-`MI_VENC_SetRcParam` looked like the way to isolate the rate half, and is not: its
-payload is 64, so the struct it carries is 56, and that is `MI_VENC_RcParam_t` --
-a separate and larger thing than the rate attributes embedded in `ChnAttr`. No
-wrapper marshals either half of `ChnAttr` on its own, so no size read can
-separate them.
-
-Localizing it needs `mi_venc.ko`, and **not** `mi_vcodec.ko`: that one is the
-driver and MHAL layer and contains zero `MI_VENC_*` symbols. `mi_venc.ko` is the
-MI layer, unstripped, 1816 symbols.
-
-`MI_VENC_CHECK_ChnAttr` does not exist. VENC does not follow VIF's
-`CHECK_`/`DEBUG_` naming, so that technique does not transfer -- it has
-`MI_VENC_IOCTL_*` thunks over `MI_VENC_IMPL_*` bodies instead, plus a private
-`_MI_VENC_IMPL_ConfigRcAttr`.
-
-The lead to follow is narrower than a whole validator. The driver keeps the rate
-attributes at **offset 252 of its internal channel context**, which is where both
-`MI_VENC_IMPL_SetChnAttr` (0x12074) and the sole caller of `ConfigRcAttr`
-(0x1b724) point with `add.w rN, r4, #252`. Immediately after computing it,
-`MI_VENC_IMPL_SetChnAttr` calls `memcmp` against it (0x1207c) to decide whether
-the rate changed:
-
-    12074:  add.w r5, r4, #252    @ context's rate slot
-    1207a:  mov   r1, r5
+    1205a:  mov   ip, r8          @ r8 = the caller's ChnAttr
+    1206a:  movs  r2, #40         @ ... 40 bytes copied from offset 0 ...
+    12074:  add.w r5, r4, #252    @ ... compared against context + 252
     1207c:  bl    memcmp
 
-**That `memcmp` settles both open questions at once.** Its length argument is the
-rate structure's true size, and its other pointer is the rate sub-struct inside
-the caller's `ChnAttr`, so the offset used to form it is where the rate half
-begins -- 36 means `i6c_venc_attrib` is four bytes too large, 40 means
-`i6c_venc_rate` is. Read the instructions before 0x1207c that set up r0 and r2.
+    1215a:  add.w ip, r8, #40     @ second piece starts at offset 40
+    1216c:  add.w r1, r4, #292    @ ... against context + 292, i.e. 252 + 40
+    12176:  movs  r2, #36         @ ... and runs 36 bytes
+    1217a:  bl    memcmp
 
-This is the validation earning its keep. VENC is the largest surface in the
-family, and the first number checked against it did not match.
+40 then 36 is 76, and the context's two mirrors sit 40 apart, so the halves are
+adjacent and neither has slack. `_MI_VENC_IMPL_ConfigRcAttr` agrees from the other
+direction: handed the whole attribute, it reads the codec from offset 0 and then
+does `adds r5, #40` to reach the rate half before passing it to
+`_MI_VENC_IMPL_ConvertRc` (0xea60). Its `subs r2, r3, #2` / `cmp r2, #2` bounds
+that codec to 2..4, which is divinus's `i6c_venc_codec` exactly — H264 2, H265 3,
+MJPG 4.
 
-`MI_SYS_BindChnPort2` reports 56 and is not one struct: it packs two channel
-ports plus the source and destination rates.
+### The excluded fields give the interior offsets
+
+When the first comparison differs, the driver does not reject the change outright.
+It overwrites a few fields in its copy of the incoming attribute with the
+channel's current values and compares again, and only fails if something *else*
+moved. Those fields are the ones a running channel is allowed to change, and the
+offsets it writes are readable:
+
+| codec | offsets rewritten | divinus's fields at those offsets |
+| --- | --- | --- |
+| H264, H265 (0x120d4) | 16, 24, 28 | `profile`, `width`, `height` |
+| MJPG (0x12116) | 20, 24 | `width`, `height` |
+
+Both arms reproduce, and the MJPG arm is the stronger half of the result: it has
+no `profile` field, so its `width` and `height` sit four bytes earlier than
+H26x's, and the driver's offsets shift by exactly that. Size alone could not have
+shown this — permuting same-width members preserves a total, and these two arms
+have different shapes.
+
+Two consequences for a consumer. `MI_VENC_SetChnAttr` will refuse any change to
+the codec half outside resolution and profile, so a codec, buffer size or
+reference-frame change means destroying the channel and creating it again. And the
+rate half gets no such exemptions: any difference over its 36 bytes sets the
+rate-dirty flag at context offset 534 and provokes a rate reconfiguration. Since
+the test is a plain `memcmp`, the unused tail of the smaller union arms counts —
+clear an `i6c_venc_rate` before filling it, or a stale byte outside the arm in use
+reconfigures the encoder for no reason.
+
+`MI_VENC_SetRcParam` is not the way to isolate the rate half, incidentally: its
+payload is 64, so the struct it carries is 56, and that is `MI_VENC_RcParam_t` —
+a separate and larger thing than the rate attributes embedded in `ChnAttr`. No
+wrapper marshals either half of `ChnAttr` on its own.
+
+Two dead ends worth not repeating. `mi_vcodec.ko` is the driver and MHAL layer and
+contains zero `MI_VENC_*` symbols; the MI layer is `mi_venc.ko`, unstripped, 1816
+symbols. And `MI_VENC_CHECK_ChnAttr` does not exist — VENC does not follow VIF's
+`CHECK_`/`DEBUG_` naming, so that technique does not transfer. It has
+`MI_VENC_IOCTL_*` thunks over `MI_VENC_IMPL_*` bodies instead, and the comparison
+above is what stands in for a validator.
+
+Everything in `i6c_venc.h` below `i6c_venc_chn` remains unchecked.
 
 ## The SoC id is usually not a parameter
 

@@ -24,6 +24,9 @@
 #ifndef SIGMASTAR_I6C_COMMON_H
 #define SIGMASTAR_I6C_COMMON_H
 
+/* offsetof, for the _Static_asserts that pin struct layouts */
+#include <stddef.h>
+
 typedef enum {
     I6C_BAYER_RG,
     I6C_BAYER_GR,
