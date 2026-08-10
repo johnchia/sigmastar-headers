@@ -44,10 +44,11 @@ Names and field order follow divinus so fixes stay diffable against upstream.
 ### `infinity6c` is vendored the same way, and validated harder
 
 Same method as the family beside it: divinus's `src/hal/star/i6c_*.h` vendored
-under its MIT licence, reworked to stand alone, and corrected where the binaries
-disagree. There is no waybeam transcription for this generation to corroborate
-against, so the validation leans entirely on the shipped artifacts — which turns
-out to be a stronger check than a second reconstruction.
+under its MIT licence, reworked to stand alone, and then checked struct by struct
+against the binaries rather than assumed. There is no waybeam transcription for
+this generation to corroborate against, so the validation leans entirely on the
+shipped artifacts — which turns out to be a stronger check than a second
+reconstruction. Every layout checked so far has held.
 
 MI marshals through an ioctl, and that makes the artifacts unusually
 forthcoming. Each userspace wrapper writes the size of the payload it is about to
@@ -65,18 +66,40 @@ exports 2574 symbols, and `MI_VIF_CHECK_*` validates fields one at a time — so
 its loads give offsets, the load instruction gives each field's width, and the
 immediate it compares against gives the valid range.
 
-`infinity6c/DERIVED.md` records what has been through that, what it cost, and
-four ways the method misleads. Two worth knowing before trusting a number: the
-size slot describes the *marshalled block* rather than the struct, so the device
-and channel ids a call prepends have to be subtracted — `MI_VIF_SetDevAttr`
-reports 24 and copies 20 — and the immediate is sometimes not a size at all, as
-`MI_VENC_CreateChn`'s 295 shows.
+`infinity6c/DERIVED.md` records what has been through that, what it cost, and the
+ways the method misleads. Two worth knowing before trusting a number. The size
+slot describes the *marshalled block* rather than the struct, so the device and
+channel ids a call prepends have to be subtracted — `MI_VIF_SetDevAttr` reports 24
+and copies 20. And the slot is not at a fixed offset in the frame: it is at
+`[sp, #4]` for SYS, VIF, SNR and SCL but `[sp, #28]` for `MI_VENC_CreateChn`, so a
+script that pattern-matches the offset reports whatever else lives there. Read the
+size out of the ioctl command word's `_IOC` field instead, which needs no
+assumption about the frame.
 
-The VIF group layout is the worked example, and it makes the case for checking
-rather than trusting either source. Its size and four field bounds came out of the
-binaries; divinus supplied the field order; and divinus's ordering reproduced a
-size and bounds it had no access to. An earlier guess from the bounds alone had
-two of those fields the wrong way round.
+Two layouts have had their field *order* checked and not merely their size, and
+between them they make the case for checking rather than trusting either source.
+The VIF group attribute's size and four field bounds came out of the binaries,
+divinus supplied the order, and divinus's ordering reproduced bounds it had no
+access to — where an earlier guess from the bounds alone had two of those fields
+the wrong way round. The VENC channel attribute went further: the driver rewrites
+just the fields a running channel may change before re-comparing, and the offsets
+it rewrites land on the right fields in *both* union arms, including the MJPG arm
+where the absence of a profile field shifts width and height four bytes earlier.
+Sizes cannot show that, since permuting same-width members preserves a total.
+
+## The assertions are 32-bit facts
+
+Compile these headers with the cross compiler, including when all you want is to
+check them. The `_Static_assert`s pin the ABI of a 32-bit ARM target, so any struct
+containing a pointer or a `long` measures differently on an LP64 host: four of the
+nine `infinity6e` headers do not compile for x86-64, and neither does
+`infinity6c/i6c_venc.h`, whose channel attribute measures 80 there against 76 on
+the target.
+
+That last one is worth singling out, because a host `sizeof` once produced a
+four-byte disagreement with the libraries that did not exist, and nothing about
+the symptom suggests a cross-compilation question. It is the one trap in this
+repository that lives in the measuring rather than in the artifact being measured.
 
 ## Layout, and why there is no SDK version in the path
 
