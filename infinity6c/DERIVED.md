@@ -54,13 +54,18 @@ Read the frame rather than pattern-matching it.
 | `MI_SNR_PlaneInfo_t` | 80 | 8 (pad, plane) | **72** |
 | `MI_SCL_OutputPortParam_t` | 36 | 12 (dev, chn, port) | **24** |
 | `MI_VENC_ChnAttr_t` | 84 | 8 (dev, chn) | **76** |
+| `MI_VENC_InitParam_t` | 12 | 4 (dev) | **8** |
+| `MI_VENC_ParamJpeg_t` | 144 | 8 (dev, chn) | **136** |
+| `MI_VENC_ChnStat_t` | 48 | 8 (dev, chn) | **40** |
+| `MI_VENC_Stream_t` | 84 | 8 (dev, chn) + 4 (timeout) | **72** |
 
-All six have now been checked against divinus's vendored layouts, compiled for
-the 32-bit ARM target, and **all six agree** — `i6c_sys_ver` 128,
-`i6c_sys_bind` 16 (two of which plus two rates is BindChnPort2's 56),
-`i6c_vif_grp` 28, `i6c_vif_dev` 20, `i6c_snr_plane` 72, `i6c_scl_port` 24,
-`i6c_venc_chn` 76. The assertions live in the headers themselves, so the check
-runs on every build rather than once.
+All ten have now been checked against divinus's vendored layouts, compiled for the
+32-bit ARM target, and **all ten agree** — `i6c_sys_ver` 128, `i6c_vif_grp` 28,
+`i6c_vif_dev` 20, `i6c_snr_plane` 72, `i6c_scl_port` 24, `i6c_venc_chn` 76,
+`i6c_venc_init` 8, `i6c_venc_jpg` 136, `i6c_venc_stat` 40, `i6c_venc_strm` 72.
+Two more that no payload reaches — `i6c_venc_pack` 184 and `i6c_venc_packinfo` 16
+— come from array strides instead, below. The assertions live in the headers
+themselves, so the check runs on every build rather than once.
 
 Worth being exact about what that proves. A matching size says the field *set* is
 right and nothing is missing or spurious; it does not say the fields are in the
@@ -166,7 +171,78 @@ symbols. And `MI_VENC_CHECK_ChnAttr` does not exist — VENC does not follow VIF
 `MI_VENC_IOCTL_*` thunks over `MI_VENC_IMPL_*` bodies instead, and the comparison
 above is what stands in for a validator.
 
-Everything in `i6c_venc.h` below `i6c_venc_chn` remains unchecked.
+### The ioctl thunks hand over the id-word count
+
+The subtraction in the table above stops being an argument count once the module
+object is open. Every `MI_VENC_IOCTL_*` thunk splits the marshalled payload itself
+before calling the `IMPL` body, so the boundary is in the instructions:
+
+    MI_VENC_IOCTL_InitDev:    ldr.w r7, [r4], #4   @ one id, struct at payload+4
+    MI_VENC_IOCTL_GetStream:  ldrd  r7, r8, [r1]   @ two ids ...
+                              add.w r2, r4, #8     @ ... struct at payload+8
+                              ldr.w r9, [r1, #80]  @ 4th argument past the struct
+
+`GetChnAttr`, `SetChnAttr` and `Query` take the same two-id shape. `GetStream` is
+the useful one: its `_IOC` size is 84 and it reads its timeout from offset 80, so
+`MI_VENC_Stream_t` is bracketed between 8 and 80 without any appeal to how many
+ids a call "should" have. `MI_VENC_ReleaseStream` marshals 80 — the same struct
+with no timeout — which is the difference showing up as a size.
+
+### Strides, where nothing is marshalled
+
+`MI_VENC_Pack_t` never crosses the boundary: the stream struct points at an array
+the caller owns, and the library fills it in place. Its size is therefore the
+stride the library steps that array by, which is stated outright:
+
+    2a96:  mov.w ip, #184        @ the stride
+    2aba:  mul.w r1, ip, fp      @ ... times the pack index
+    2ace:  add.w ip, r3, r0      @ ... off strm.packet
+
+**184**, and `i6c_venc_pack` measures 184. Its declared members reach 180, and the
+remaining four bytes are alignment rather than an omission — the two `u64` members
+align the struct to 8. The offsets come from the same loop, which writes `addr` and
+`data` as one `strd` at 0, `timestamp` as an 8-byte `vstr` at 16, `endFrame` as the
+prefix's only byte store at 24, `offset` and `packNum` at 32, `frameQual` at 40,
+and `picOrder` with `gradient` as a `strd` at 44.
+
+`MI_VENC_PackInfo_t`'s size is a stride too, from the H264 NAL scanner:
+
+    2d12:  lsls r0, r4, #4        @ index * 16
+    2d16:  add  r0, r2            @ ... off the pack base
+    2d1a:  strd r3, r1, [r0, #52] @ packType and offset, so the array starts at 52
+    2d28:  cmp  r5, #7            @ ... and holds 8
+
+`length` is back-filled one entry behind, as this entry's offset less the previous
+one's (`ldr r3, [r0, #40]` against `str r3, [r4, #44]`), which places it at 8 and
+leaves `sliceId` the remaining word at 12.
+
+### Confirmed a field at a time
+
+`MI_VENC_ChnStat_t` needs no size argument at all: `MI_VENC_IMPL_Query`'s debug
+path reads the struct in one descending sweep — offsets 36, 32, 28, 24, 20, 16, 12,
+8, 4, 0 and nothing above 36 — so it is exactly ten words, which is both the 40 the
+payload implies and divinus's field count.
+
+`MI_VENC_ParamJpeg_t`'s two 64-byte tables place themselves:
+
+    274a:  add.w r1, r5, #68      @ the second table
+    274e:  ldr.w r2, [r3], #4     @ quality, advancing to 4 ...
+    2756:  ldrb.w r0, [r3], #1    @ ... where the first table is read as bytes
+
+Quality at 0, `qtLuma` from 4, `qtChroma` from 68 — so `qtLuma` is 64 long — and
+with the total at 136 the trailing word at 132 is `mcuPerEcs`.
+
+The three stream-info union arms each confirm at one interior offset, and the
+offsets carry more weight than a size would. `MI_VENC_GetStream` extracts the same
+3-bit reference type and writes it to `strm+60` on the H264 path and `strm+52` on
+the H265 path; with the union at `strm+16` those are offsets 44 and 36, which is
+`refType` in each arm, and they differ by exactly the eight bytes the H264 arm is
+longer. MJPG's frame quality goes to `strm+24`, its arm's offset 8. Only the H264
+arm's *size* is pinned, since as the largest it is the union's own size — a shorter
+arm's size is unobservable, so 48 and 12 stay bounded rather than fixed.
+
+Still unchecked in `i6c_venc.h`: every enumeration except `i6c_venc_codec`, whose
+2..4 `ConfigRcAttr` bounds explicitly with `subs r2, r3, #2` / `cmp r2, #2`.
 
 ## The SoC id is usually not a parameter
 

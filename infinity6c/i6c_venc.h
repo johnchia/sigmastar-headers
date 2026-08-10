@@ -335,11 +335,34 @@ typedef struct {
  * reproduces both union arms, MJPG included: it has no profile field, so its
  * width and height sit four bytes earlier than H26x's.
  *
- * Nothing below i6c_venc_chn has been checked against the libraries.
+ * The rest of the module is checked the same way, and also comes out as divinus
+ * has it. The ioctl thunks in mi_venc.ko are the shortcut: each one splits the
+ * marshalled payload itself, so the id words a call prepends can be read off
+ * rather than counted. MI_VENC_IOCTL_InitDev takes one id and puts the struct at
+ * payload+4 of 12; the GetStream, GetChnAttr, SetChnAttr and Query thunks take
+ * two and put it at payload+8; and MI_VENC_IOCTL_GetStream fetches its timeout
+ * from payload+80, which brackets MI_VENC_Stream_t between 8 and 80.
  *
- * These sizes are the 32-bit target ABI, and i6c_venc_rate ends in a pointer, so
- * a host compiler measures it four bytes over and none of the totals here hold.
- * Compile the asserts with the cross compiler; see the README.
+ * MI_VENC_Pack_t is never marshalled -- the stream struct points at an array the
+ * caller owns -- so its size comes from the stride the library indexes that array
+ * with, 184, and the offsets from the fields it writes. i6c_venc_pack measuring
+ * 180 of payload in a 184-byte footprint is not slack: the u64 members align it
+ * to 8, and 184 is what the stride confirms.
+ *
+ * The three stream-info arms are each confirmed at one interior offset, and the
+ * offsets are the load-bearing part. The same 3-bit reference type is written to
+ * strm+60 for H264 and strm+52 for H265, which is refType's slot in each arm and
+ * differs by exactly the eight bytes the H264 arm is longer; MJPG's quality lands
+ * at strm+24, its arm's offset 8. Only the H264 arm's *size* is pinned, as the
+ * largest and therefore the union's own size -- a shorter arm's size is not
+ * observable, so h265 at 48 and mjpg at 12 remain bounded rather than fixed.
+ *
+ * Unchecked: every enumeration except i6c_venc_codec, whose 2..4 the driver
+ * bounds explicitly.
+ *
+ * These sizes are the 32-bit target ABI, and i6c_venc_rate and i6c_venc_pack
+ * contain pointers, so a host compiler measures them over and none of the totals
+ * here hold. Compile the asserts with the cross compiler; see the README.
  */
 _Static_assert(sizeof(i6c_venc_attrib) == 40, "MI_VENC_Attr_t is the 40 bytes SetChnAttr compares");
 _Static_assert(sizeof(i6c_venc_rate) == 36, "MI_VENC_RcAttr_t is the 36 bytes SetChnAttr compares");
@@ -350,5 +373,38 @@ _Static_assert(offsetof(i6c_venc_attrib, h264.width) == 24, "H26x width is one o
 _Static_assert(offsetof(i6c_venc_attrib, h264.height) == 28, "H26x height is one of the masked fields");
 _Static_assert(offsetof(i6c_venc_attrib, mjpg.width) == 20, "MJPG width is one of the masked fields");
 _Static_assert(offsetof(i6c_venc_attrib, mjpg.height) == 24, "MJPG height is one of the masked fields");
+
+_Static_assert(sizeof(i6c_venc_init) == 8, "MI_VENC_InitParam_t is InitDev's payload less one id");
+_Static_assert(sizeof(i6c_venc_jpg) == 136, "MI_VENC_ParamJpeg_t is what Set/GetJpegParam memcpy");
+_Static_assert(offsetof(i6c_venc_jpg, qtLuma) == 4, "SetJpegParam reads quality, then bytes from 4");
+_Static_assert(offsetof(i6c_venc_jpg, qtChroma) == 68, "SetJpegParam takes the second table from +68");
+_Static_assert(offsetof(i6c_venc_jpg, mcuPerEcs) == 132, "the tables leave one word at the end");
+
+_Static_assert(sizeof(i6c_venc_stat) == 40, "MI_VENC_ChnStat_t is Query's payload less two ids");
+_Static_assert(offsetof(i6c_venc_stat, bitrate) == 36, "IMPL_Query sweeps all ten words, 36 down to 0");
+
+_Static_assert(sizeof(i6c_venc_strm) == 72, "MI_VENC_Stream_t spans payload 8 to 80 in GetStream");
+_Static_assert(offsetof(i6c_venc_strm, count) == 4, "GetStream's pack loop bounds on this");
+_Static_assert(offsetof(i6c_venc_strm, h264Info) == 16, "the stream-info union starts here");
+_Static_assert(sizeof(i6c_venc_strminfo_h264) == 56, "the largest arm, so the union's own size");
+_Static_assert(offsetof(i6c_venc_strminfo_h264, refType) == 44, "written as strm+60");
+_Static_assert(offsetof(i6c_venc_strminfo_h265, refType) == 36, "written as strm+52");
+_Static_assert(offsetof(i6c_venc_strminfo_mjpg, quality) == 8, "written as strm+24");
+
+/*
+ * i6c_venc_pack's stride is what the library steps the caller's array by, so an
+ * error here walks off the array rather than corrupting one field.
+ */
+_Static_assert(sizeof(i6c_venc_pack) == 184, "GetStream indexes the pack array with mul #184");
+_Static_assert(offsetof(i6c_venc_pack, data) == 8, "GetStream writes addr and data as one strd");
+_Static_assert(offsetof(i6c_venc_pack, timestamp) == 16, "written as an 8-byte vstr");
+_Static_assert(offsetof(i6c_venc_pack, endFrame) == 24, "the only byte store in the prefix");
+_Static_assert(offsetof(i6c_venc_pack, packNum) == 36, "the NAL scanner's final count");
+_Static_assert(offsetof(i6c_venc_pack, frameQual) == 40, "byte-stored from the same source as mjpg quality");
+_Static_assert(offsetof(i6c_venc_pack, picOrder) == 44, "written with gradient as one strd");
+_Static_assert(offsetof(i6c_venc_pack, packetInfo) == 52, "the NAL scanner's base, indexed by lsl #4");
+_Static_assert(sizeof(i6c_venc_packinfo) == 16, "that lsl #4 is the stride");
+_Static_assert(offsetof(i6c_venc_packinfo, length) == 8, "back-filled as this offset less the previous");
+_Static_assert(offsetof(i6c_venc_packinfo, sliceId) == 12, "the remaining word the scanner writes");
 
 #endif /* SIGMASTAR_I6C_VENC_H */
