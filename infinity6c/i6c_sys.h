@@ -171,4 +171,34 @@ typedef struct {
 _Static_assert(sizeof(i6c_sys_ver) == 128, "MI_SYS_GetVersion fills 128 bytes");
 _Static_assert(sizeof(i6c_sys_bind) == 16, "two of these plus two rates is the 56 BindChnPort2 marshals");
 
+/*
+ * The pool descriptors are pinned by offset rather than by size, because
+ * MI_SYS_ConfigPrivateMMAPool does not marshal this struct wholesale. It reads
+ * named fields out of it and composes a differently shaped 68-byte block, so the
+ * payload size says nothing about sizeof() here -- only the reads do:
+ *
+ *   ldr  r2, [r1]        the type, a word at 0
+ *   ldrb r1, [r1, #4]    the create flag, a byte at 4
+ *   ldrd r0, r1, [r4, #8]    the union at 8: module, then device
+ *   ldr  r2, [r4, #16]       union + 8
+ *   ldrh r3, [r4, #20]       union + 12, a halfword
+ *   add.w r6, r4, #22 ; strlen   union + 14, the heap name
+ *
+ * That last offset is what settles the ring descriptor's shape. A name starting
+ * at 14 leaves exactly three halfwords between the device and it, which is the
+ * only arrangement that fits -- and the halfword load at union + 12 confirms one
+ * of the three directly. Which of the two at union + 8 is the width and which the
+ * height is not derived: a single word load covers both, and only the pair's
+ * position is observable.
+ *
+ * The union's own size is not reachable this way either, since nothing copies it
+ * whole. The arms are upstream's.
+ */
+_Static_assert(offsetof(i6c_sys_pool, create) == 4, "read with ldrb, one word past the type");
+_Static_assert(offsetof(i6c_sys_pool, config) == 8, "every arm is read relative to here");
+_Static_assert(offsetof(i6c_sys_poolring, device) == 4, "the second word of the ldrd at union + 8");
+_Static_assert(offsetof(i6c_sys_poolring, maxWidth) == 8, "the word read at union + 8");
+_Static_assert(offsetof(i6c_sys_poolring, ringLine) == 12, "the halfword read at union + 12");
+_Static_assert(offsetof(i6c_sys_poolring, heapName) == 14, "where strlen is pointed, at union + 14");
+
 #endif /* SIGMASTAR_I6C_SYS_H */
