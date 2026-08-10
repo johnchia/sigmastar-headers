@@ -108,10 +108,31 @@ a separate and larger thing than the rate attributes embedded in `ChnAttr`. No
 wrapper marshals either half of `ChnAttr` on its own, so no size read can
 separate them.
 
-Localizing it needs `mi_vcodec.ko`, the same way VIF's group was localized:
-`MI_VENC_CHECK_ChnAttr` will bound fields individually, and the offset at which
-the rate sub-struct begins settles it -- 40 means the attributes are correct and
-the rate is four bytes long, 36 the reverse.
+Localizing it needs `mi_venc.ko`, and **not** `mi_vcodec.ko`: that one is the
+driver and MHAL layer and contains zero `MI_VENC_*` symbols. `mi_venc.ko` is the
+MI layer, unstripped, 1816 symbols.
+
+`MI_VENC_CHECK_ChnAttr` does not exist. VENC does not follow VIF's
+`CHECK_`/`DEBUG_` naming, so that technique does not transfer -- it has
+`MI_VENC_IOCTL_*` thunks over `MI_VENC_IMPL_*` bodies instead, plus a private
+`_MI_VENC_IMPL_ConfigRcAttr`.
+
+The lead to follow is narrower than a whole validator. The driver keeps the rate
+attributes at **offset 252 of its internal channel context**, which is where both
+`MI_VENC_IMPL_SetChnAttr` (0x12074) and the sole caller of `ConfigRcAttr`
+(0x1b724) point with `add.w rN, r4, #252`. Immediately after computing it,
+`MI_VENC_IMPL_SetChnAttr` calls `memcmp` against it (0x1207c) to decide whether
+the rate changed:
+
+    12074:  add.w r5, r4, #252    @ context's rate slot
+    1207a:  mov   r1, r5
+    1207c:  bl    memcmp
+
+**That `memcmp` settles both open questions at once.** Its length argument is the
+rate structure's true size, and its other pointer is the rate sub-struct inside
+the caller's `ChnAttr`, so the offset used to form it is where the rate half
+begins -- 36 means `i6c_venc_attrib` is four bytes too large, 40 means
+`i6c_venc_rate` is. Read the instructions before 0x1207c that set up r0 and r2.
 
 This is the validation earning its keep. VENC is the largest surface in the
 family, and the first number checked against it did not match.
