@@ -58,29 +58,47 @@ Read the frame rather than pattern-matching it.
 | `MI_VENC_ParamJpeg_t` | 144 | 8 (dev, chn) | **136** |
 | `MI_VENC_ChnStat_t` | 48 | 8 (dev, chn) | **40** |
 | `MI_VENC_Stream_t` | 84 | 8 (dev, chn) + 4 (timeout) | **72** |
+| `MI_VIF_OutputPortAttr_t` | 32 | 8 (dev, port) | **24** |
+| `MI_SCL_ChnParam_t` | 12 | 8 (dev, chn) | **4** |
 
-All ten have now been checked against divinus's vendored layouts, compiled for the
-32-bit ARM target, and **all ten agree** — `i6c_sys_ver` 128, `i6c_vif_grp` 28,
-`i6c_vif_dev` 20, `i6c_snr_plane` 72, `i6c_scl_port` 24, `i6c_venc_chn` 76,
-`i6c_venc_init` 8, `i6c_venc_jpg` 136, `i6c_venc_stat` 40, `i6c_venc_strm` 72.
-Two more that no payload reaches — `i6c_venc_pack` 184 and `i6c_venc_packinfo` 16
-— come from array strides instead, below. The assertions live in the headers
-themselves, so the check runs on every build rather than once.
+Eleven of the twelve have been checked against divinus's vendored layouts,
+compiled for the 32-bit ARM target, and **all eleven agree** — `i6c_sys_ver` 128,
+`i6c_vif_grp` 28, `i6c_vif_dev` 20, `i6c_vif_port` 24, `i6c_snr_plane` 72,
+`i6c_scl_port` 24, `i6c_venc_chn` 76, `i6c_venc_init` 8, `i6c_venc_jpg` 136,
+`i6c_venc_stat` 40, `i6c_venc_strm` 72. The twelfth, `MI_SCL_ChnParam_t`, has no
+divinus counterpart to check — divinus does not call `MI_SCL_SetChnParam` — so
+`i6c_scl_chn` is declared from the binaries alone. Two more that no payload
+reaches, `i6c_venc_pack` 184 and `i6c_venc_packinfo` 16, come from array strides
+instead, below. The assertions live in the headers themselves, so the check runs
+on every build rather than once.
+
+**The id-word column used to be an argument count, and is now a reading.** Every
+module's ioctl thunk splits the payload before calling the `IMPL` body, so the
+boundary is in the instructions rather than in an assumption about the signature.
+That retired two guesses: `MI_VIF_IOCTL_SetDevAttr` takes **one** id
+(`ldr.w r7, [r4], #4`), which is what makes `MI_VIF_DevAttr_t` 20 rather than 16,
+and `MI_SCL_IOCTL_SetOutputPortParam` takes **three** (`ldr [r4]`,
+`ldrd [r4, #4]`, struct at `+12`), which is what makes `MI_SCL_OutputPortParam_t`
+24 rather than 28. Both assertions predated the check and both survive it.
 
 Worth being exact about what that proves. A matching size says the field *set* is
 right and nothing is missing or spurious; it does not say the fields are in the
-right order, since permuting same-width members preserves the total. Two have had
-their order checked as well: `i6c_vif_grp` via the bounds in
-`MI_VIF_CHECK_GroupAttr`, and `i6c_venc_chn` via the fields
-`MI_VENC_IMPL_SetChnAttr` excludes from its comparison. For the rest, size is
-necessary and not sufficient.
+right order, since permuting same-width members preserves the total. Most have had
+their order or their field widths checked as well, each from whatever in the
+modules reads them: `i6c_vif_grp` from `MI_VIF_CHECK_GroupAttr`'s bounds,
+`i6c_vif_dev` and `i6c_vif_port` from the validators and `MI_VIF_IMPL_SetDevAttr`,
+`i6c_venc_chn` from the fields `MI_VENC_IMPL_SetChnAttr` excludes from its
+comparison, and `i6c_venc_strm`, `i6c_venc_pack`, `i6c_venc_packinfo`,
+`i6c_venc_jpg` and `i6c_venc_stat` from the code that fills them. That leaves
+`i6c_sys_ver` (a byte array, so nothing to order), `i6c_snr_plane` and
+`i6c_scl_port` on size alone.
 
 Absent from the table because it is not one struct: `MI_SYS_BindChnPort2` reports
 56, which is two channel ports plus the source and destination rates.
 
-Not yet decomposed: `MI_VIF_OutputPortAttr_t` (payload 32, id words not yet
-counted) and `MI_SCL_ChnParam_t` (`MI_SCL_SetChnParam` has no matching size slot,
-so it is shaped differently).
+`MI_SCL_ChnParam_t` was recorded here as having "no matching size slot, so it is
+shaped differently". It is not shaped differently — it is four bytes, and a
+one-word struct is small enough that the number looked like something else.
 
 ## VENC, and the one trap that is in the measuring rather than the binary
 
@@ -263,10 +281,17 @@ literal 0.
 
 ## Where this method stops
 
-Field order and offsets are **not** derivable from these libraries. Every setter
-and getter above copies the caller's struct wholesale — `ldmia`/`stmia` or
-`memcpy` — and never touches a field, because the decoding happens on the other
-side of the ioctl. The sizes are real; the interiors are opaque here.
+Field order and offsets are mostly **not** derivable from these libraries. Setters
+and getters copy the caller's struct wholesale — `ldmia`/`stmia` or `memcpy` — and
+never touch a field, because the decoding happens on the other side of the ioctl.
+For those the sizes are real and the interiors are opaque.
+
+The exception is worth knowing, because it is where the richest offsets in this
+document came from: a call that hands back an array the *caller* owns cannot
+delegate, since the array never crosses the boundary. `MI_VENC_GetStream` fills the
+pack array itself, field by field, and so gives up its stride and its whole
+interior in userspace. If a struct's offsets seem unreachable, check whether some
+call has to touch it on this side.
 
 The decoders are the per-module kernel objects, and they are not in
 sigmastar-lib, which ships userspace libraries only. They are in
@@ -322,28 +347,43 @@ the size and the offsets come from opposite sides of the ioctl and agree.
 The three unchecked tail words are consistent with a flag and a bitmask, which
 this function would have no bound to test.
 
-`MI_VIF_DevAttr_t`, 20 bytes, from `MI_VIF_CHECK_DevAttr` (0x3788):
+`MI_VIF_DevAttr_t`, 20 bytes. Two sources rather than one: the validator bounds
+some fields, and `MI_VIF_IMPL_SetDevAttr` reads all of them, which is what settles
+the widths.
 
-| offset | width | bound |
-| --- | --- | --- |
-| 0 | 32 | non-zero |
-| 4 | — | not read here |
-| 8 | 16 | — |
-| 10 | 16 | — |
-| 12 | 32 | < 3 |
-| 16 | 8 | < 1, so boolean |
-| — | | 3 bytes tail padding to 20 |
+| offset | width | what reads it | name |
+| --- | --- | --- | --- |
+| 0 | 32 | `MI_VIF_PLATFORM_DevPixelSupport` | pixel format |
+| 4, 6 | 16, 16 | IMPL only | crop origin |
+| 8, 10 | 16, 16 | `_MI_VIF_CHECK_RectValid(w, h)` | crop width, height |
+| 12 | 32 | `_MI_VIF_CHECK_FieldValid`, bounded ≤ 3 | field |
+| 16 | 8 | read as a byte | half horizontal scan |
+| 17..19 | — | nothing reads past 16 | padding to 20 |
 
-Offsets 8 and 10 being adjacent halfwords, with 4 and 6 untouched, fits an
-8-byte rectangle at offset 4 whose width and height are validated and whose
-origin is not — `MI_SYS_WindowRect_t` is four halfwords. Stated as the reading
-it is, not as a fact: nothing here has confirmed 4 and 6 exist as separate
-fields.
+Every name here comes from something that reads the field rather than from
+plausibility. The earlier revision of these notes hedged on whether 4 and 6
+existed as separate fields, because the validator does not touch them;
+`MI_VIF_IMPL_SetDevAttr` does, reading four consecutive halfwords at 4, 6, 8 and
+10, so the crop is a rect and only its width and height are range-checked.
 
-**These are offsets, not names.** Assigning names means correlating each failing
-branch with the format string it prints, which the module makes possible — it
-complains in terms of `IntfMode`, `HdrType`, `workmode` and `Clkedge` — but that
-correlation has not been done, so no struct is declared from this yet.
+Two corrections to that earlier revision. Offset 0 was recorded as merely
+"non-zero" — it is handed to `MI_VIF_PLATFORM_DevPixelSupport`, which names it. And
+offset 12's bound was recorded as `< 3`; the instruction is `cmp r3, #3` with
+`bls`, so it is **≤ 3** and the field has four values. That matters, because
+divinus annotates its `field` member as "Values 0-3 correspond to No, Top, Bottom,
+Both" — four values, which the corrected bound matches and the wrong one
+contradicted. The module confirms the last of them in as many words, complaining
+that "Field is both, not support port1 out".
+
+`MI_VIF_OutputPortAttr_t`, 24 bytes, from `MI_VIF_CHECK_PortAttr` (0x3ca0): six
+halfwords at 0, 2, 4, 6, 8 and 10, then three words at 12, 16 and 20. That is an
+8-byte rect, a 4-byte dimension and three enums, and it sums to the 24 the payload
+gives — the two derivations meet from opposite sides of the ioctl. The validator
+names two of the three words by what it passes them to,
+`MI_VIF_PLATFORM_OutputPortPixelSupport` and `MI_VIF_PLATFORM_SupportCompress`,
+and its complaints distinguish the rect from the dimension: "check CapRect w/h
+%dx%d invalid" against "PortId %u, check dest rect invalid".
+
 
 ### Naming, as far as the strings take it
 
@@ -421,3 +461,30 @@ address the relocation points at, so the sequence is: find the pool entry the
 `ldr rN, [pc, #...]` resolves to, read the word stored there, and use it as a
 byte offset into `.rodata.str1.1`
 (`objdump -s -j .rodata.str1.1`). Only then does a branch get a name.
+
+## SCL, from `MI_SCL_CHECK_ChnParam` in mi_scl.ko
+
+`MI_SCL_ChnParam_t` is four bytes — one word, which the validator (0x3488) accepts
+at zero and rejects above 3:
+
+    34c4:  ldr r3, [r6, #0]
+    34c6:  cmp r3, #0
+    34c8:  beq 34c0        @ zero returns immediately
+    34ca:  cmp r3, #3
+    34cc:  bls 34fa        @ 1..3 continue to the source-mask check
+
+So four values, the first meaning "off". The module calls the field `rot`: its
+second check complains "SclSrcMask 0x%x, not support rot", and elsewhere it carries
+`_HalSclSetRotationCfg` and `MI_SCL_CHECK_MirrorFlipVaild` as separate things — so
+this word is the rotation, not the mirror and flip pair that `i6c_scl_port` already
+holds.
+
+**The angles are not derived.** Nothing in the module prints 90, 180 or 270, so
+mapping 1, 2 and 3 onto them is convention, and `i6c_scl_chn` says so at the
+declaration. It is the one place in this family where a label rests on convention
+rather than on a read, and it is tolerable only because the failure is visible:
+a turned picture, not corrupted memory.
+
+This is also the only struct here with no divinus counterpart — divinus never calls
+`MI_SCL_SetChnParam` — so there was nothing to check against and nothing to keep
+diffable.

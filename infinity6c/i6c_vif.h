@@ -81,17 +81,46 @@ typedef struct {
 /*
  * Sizes checked against the shipped libraries, not taken on trust. Each
  * userspace wrapper writes its marshalled payload size into the ioctl block as a
- * literal; subtract the ids the call prepends and the remainder is the struct.
+ * literal, and the module's ioctl thunk splits that payload itself -- so the ids
+ * a call prepends are read off rather than counted:
  *
- *   i6c_vif_grp   MI_VIF_CreateDevGroup marshals 32, less a 4-byte group id
- *   i6c_vif_dev   MI_VIF_SetDevAttr     marshals 24, less a 4-byte device id
+ *   i6c_vif_grp    CreateDevGroup     32, one id  (thunk: ldr [r4], #4)
+ *   i6c_vif_dev    SetDevAttr         24, one id  (thunk: ldr [r4], #4)
+ *   i6c_vif_port   SetOutputPortAttr  32, two ids (thunk: ldrd [r1], add #8)
  *
- * The group's field order is checked too, which size alone cannot do:
- * MI_VIF_CHECK_GroupAttr in mi_vif.ko bounds offset 0 below 5, 4 below 2, 8
+ * Field order is checked too, which size alone cannot do, since permuting
+ * same-width members preserves a total.
+ *
+ * i6c_vif_grp: MI_VIF_CHECK_GroupAttr bounds offset 0 below 5, 4 below 2, 8
  * below 4 and 12 below 2, which is the interface mode, work mode, HDR type and
- * clock edge in that order. See DERIVED.md.
+ * clock edge in that order.
+ *
+ * i6c_vif_dev: every member is named by what reads it. Offset 0 goes to
+ * MI_VIF_PLATFORM_DevPixelSupport; MI_VIF_IMPL_SetDevAttr reads four halfwords
+ * at 4, 6, 8 and 10, of which the validator passes 8 and 10 to
+ * _MI_VIF_CHECK_RectValid, so the crop is a rect whose width and height are
+ * checked and whose origin is not; offset 12 is bounded at or below 3 and
+ * belongs to _MI_VIF_CHECK_FieldValid, whose four values the module names when it
+ * complains that "Field is both"; and offset 16 is read as a single byte.
+ * Nothing reads past 16, which is what makes the last three bytes padding.
+ *
+ * i6c_vif_port: MI_VIF_CHECK_PortAttr reads six halfwords at 0, 2, 4, 6, 8, 10
+ * and three words at 12, 16 and 20 -- an 8-byte rect, a 4-byte dimension and
+ * three enums, totalling the 24 derived above. It hands offset 12 to
+ * MI_VIF_PLATFORM_OutputPortPixelSupport and offset 20 to
+ * MI_VIF_PLATFORM_SupportCompress, naming those two.
+ *
+ * See DERIVED.md.
  */
 _Static_assert(sizeof(i6c_vif_grp) == 28, "MI_VIF_CreateDevGroup marshals 32 less a group id");
 _Static_assert(sizeof(i6c_vif_dev) == 20, "MI_VIF_SetDevAttr marshals 24 less a device id");
+_Static_assert(sizeof(i6c_vif_port) == 24, "MI_VIF_SetOutputPortAttr marshals 32 less two ids");
+
+_Static_assert(offsetof(i6c_vif_dev, crop) == 4, "IMPL_SetDevAttr reads the crop as halfwords from 4");
+_Static_assert(offsetof(i6c_vif_dev, field) == 12, "the word _MI_VIF_CHECK_FieldValid bounds at 3");
+_Static_assert(offsetof(i6c_vif_dev, halfHScan) == 16, "the last thing read, and read as a byte");
+_Static_assert(offsetof(i6c_vif_port, dest) == 8, "the rect ends here and the dimension begins");
+_Static_assert(offsetof(i6c_vif_port, pixFmt) == 12, "handed to PLATFORM_OutputPortPixelSupport");
+_Static_assert(offsetof(i6c_vif_port, compress) == 20, "handed to PLATFORM_SupportCompress");
 
 #endif /* SIGMASTAR_I6C_VIF_H */

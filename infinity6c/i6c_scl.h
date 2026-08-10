@@ -50,9 +50,43 @@ typedef struct {
 } i6c_scl_port;
 
 /*
- * MI_SCL_SetOutputPortParam marshals 36 bytes, less three 4-byte ids for the
- * device, channel and port. Size only -- field order unchecked. See DERIVED.md.
+ * Rotation, and the only declaration here with no divinus counterpart -- it does
+ * not use MI_SCL_SetChnParam, so there was nothing to vendor.
+ *
+ * What the binaries fix is the count and the zero case, not the angles.
+ * MI_SCL_CHECK_ChnParam accepts zero immediately and rejects anything above 3, so
+ * there are four values and the first is "no rotation"; the module calls the field
+ * rot. The order of the remaining three is the vendor's usual ascending one and is
+ * *not* derived -- getting it wrong turns a picture, which is visible and
+ * harmless, unlike a layout error.
+ */
+typedef enum {
+    I6C_SCL_ROTATE_NONE,
+    I6C_SCL_ROTATE_90,
+    I6C_SCL_ROTATE_180,
+    I6C_SCL_ROTATE_270,
+    I6C_SCL_ROTATE_END
+} i6c_scl_rotate;
+
+typedef struct {
+    i6c_scl_rotate rotate;
+} i6c_scl_chn;
+
+/*
+ * Sizes read off the ioctl payloads, with the id words taken from the module's own
+ * thunks rather than counted:
+ *
+ *   i6c_scl_port  SetOutputPortParam  36, three ids (ldr [r4], ldrd [r4, #4],
+ *                                                   struct at +12)
+ *   i6c_scl_chn   SetChnParam         12, two ids   (ldrd [r4], struct at +8)
+ *
+ * Neither struct's field order is checked. The port's four bytes of scalars
+ * between two shaped members make it the more likely of the two to be wrong, and
+ * the channel param is a single word, so there is nothing to permute.
+ *
+ * See DERIVED.md.
  */
 _Static_assert(sizeof(i6c_scl_port) == 24, "MI_SCL_SetOutputPortParam marshals 36 less three ids");
+_Static_assert(sizeof(i6c_scl_chn) == 4, "MI_SCL_SetChnParam marshals 12 less two ids");
 
 #endif /* SIGMASTAR_I6C_SCL_H */
