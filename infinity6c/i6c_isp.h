@@ -122,4 +122,78 @@ _Static_assert(offsetof(i6c_isp_port, pixFmt) == 8, "printed as the pixel format
 _Static_assert(offsetof(i6c_isp_port, compress) == 12, "printed as Compress");
 _Static_assert(offsetof(i6c_isp_port, multiPlanes) == 16, "printed as the layout");
 
+/*
+ * ================================================================
+ * THE TUNING API: PAYLOAD SIZES AND MANUAL-BLOCK OFFSETS
+ *
+ * MI_ISP_IQ_* and MI_ISP_AE_* are not typed ioctls the way the pipeline
+ * calls above are. Each is a thin wrapper that stacks a 24-byte descriptor
+ * of {descriptor length, payload length, api id, channel, device, 0} and
+ * hands it to MI_ISP_GENERAL_{Set,Get}IspApiData with the caller's buffer.
+ * So one function pointer shape serves every module and the only per-module
+ * facts are the two numbers below -- which is why hal_isp.c drives them from
+ * a table rather than from a struct apiece.
+ *
+ * PAYLOAD is the length in that descriptor: what the library copies, so what
+ * the staging buffer must be able to hold. Read out of each wrapper's own
+ * literal pool, where it sits as the second word of the pair loaded into
+ * d16 (the first is always 0x18, the descriptor's own length).
+ *
+ * MANUAL is offsetof(stManual) for a module whose payload is
+ * { bEnable, enOpType, stAuto[16], stManual }. Writing a level anywhere else
+ * lands in the per-ISO auto array: it does not take effect, and it corrupts
+ * one auto entry on the way past.
+ *
+ * Every number here is derived twice and the two agree. The maruko headers
+ * give the struct layout (MI_ISP_AUTO_NUM is 16; SaturationParam is 24 bytes
+ * from SAT_LUT_X_NUM 5 and SAT_LUT_Y_NUM 6; DefogParam is one byte), and
+ * the shipped blob's descriptor gives the length independently. Where the
+ * derivations could disagree they do not: 8 + 16*24 + 24 lands exactly on
+ * the 416 the wrapper declares.
+ *
+ * Eight of the ten modules hal_isp drives on Infinity6E carry the same
+ * layout here, which is worth stating because MI 3.0 shares no layout with
+ * MI 2.x anywhere else in this directory. The two that differ are the ones
+ * with the large per-frequency tables -- sharpness is 6264 bytes against
+ * Infinity6E's 1268, 3DNR 1912 against 1776 -- so they are deliberately
+ * absent below rather than guessed at. Their interiors are per-band arrays
+ * rather than a level, and a single scalar has no honest place to land in
+ * one; Infinity6C reaches 3DNR through i6c_isp_para.level3DNR instead.
+ *
+ * DEFOG is the one module whose vendor struct differs from Infinity6E's in
+ * kind rather than size. There it is a bare 4-byte enable; on maruko it is
+ * a full auto/manual module carrying a strength byte, so it has a manual
+ * offset here where Infinity6E's table needs none.
+ *
+ * tests/abi_iq_i6c.c asserts all of this against the vendor headers.
+ * ================================================================
+ */
+typedef int (*i6c_isp_cmd_fn)(unsigned int device, unsigned int channel, void *payload);
+
+#define I6C_ISP_IQ_BRIGHTNESS_PAYLOAD 76
+#define I6C_ISP_IQ_BRIGHTNESS_MANUAL  72
+#define I6C_ISP_IQ_CONTRAST_PAYLOAD   76
+#define I6C_ISP_IQ_CONTRAST_MANUAL    72
+#define I6C_ISP_IQ_SATURATION_PAYLOAD 416
+#define I6C_ISP_IQ_SATURATION_MANUAL  392
+#define I6C_ISP_IQ_DEFOG_PAYLOAD      28
+#define I6C_ISP_IQ_DEFOG_MANUAL       24
+
+#define I6C_ISP_IQ_GRAY_PAYLOAD       4
+#define I6C_ISP_AE_EVCOMP_PAYLOAD     8
+#define I6C_ISP_AE_FLICKER_PAYLOAD    4
+
+/* X(row, vendor type) -- payload is { bEnable, enOpType, stAuto[16], stManual }. */
+#define I6C_ISP_IQ_AUTOMAN_ROWS(X)                \
+    X(IQ_BRIGHTNESS, MI_ISP_IQ_BrightnessType_t)  \
+    X(IQ_CONTRAST,   MI_ISP_IQ_ContrastType_t)    \
+    X(IQ_SATURATION, MI_ISP_IQ_SaturationType_t)  \
+    X(IQ_DEFOG,      MI_ISP_IQ_DefogType_t)
+
+/* X(row, vendor type) -- no auto/manual split; the field written is at offset 0. */
+#define I6C_ISP_IQ_FLAT_ROWS(X)                   \
+    X(IQ_GRAY,    MI_ISP_IQ_ColorToGrayType_t)    \
+    X(AE_EVCOMP,  MI_ISP_AE_EvCompType_t)         \
+    X(AE_FLICKER, MI_ISP_AE_FlickerType_e)
+
 #endif /* SIGMASTAR_I6C_ISP_H */

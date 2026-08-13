@@ -644,3 +644,59 @@ so the SoC id is not a separate argument here as it is on MI_SYS and MI_RGN — 
 rides in the **high halfword of the device argument** and the wrapper shifts it out.
 On a single-die part both halves are zero and the distinction is invisible, which is
 exactly what makes it worth writing down.
+
+### The tuning API declares its own payload sizes
+
+`MI_ISP_IQ_*` and `MI_ISP_AE_*` are not typed ioctls like the three layouts above.
+Every one of them is the same wrapper: stack a 24-byte descriptor, fill in a payload
+length and an api id, and call `MI_ISP_GENERAL_SetIspApiData` with the caller's
+buffer. `MI_ISP_IQ_SetContrast` in full —
+
+    push    {r4, lr}
+    sub     sp, #24
+    vldr    d16, [pc, #40]      @ the pair {0x18, 0x4c}
+    str     r3, [sp, #12]       @ channel
+    movw    r2, #0x1005         @ api id
+    str     r4, [sp, #16]       @ device
+    vstr    d16, [sp]           @ descriptor length, payload length
+    str     r2, [sp, #8]
+    blx     MI_ISP_GENERAL_SetIspApiData
+
+The literal pool is the whole point. The first word is always `0x18`, the
+descriptor's own length; the second is the **payload length** — what the library
+copies into and out of the caller's buffer. So a module's size is stated outright by
+the binary that will do the copying, with no measuring involved, and the `*Call`
+variant states it a second time as the argument to its `calloc`.
+
+That makes this the one corner of the family where the header and the blob can be
+checked against each other cheaply, and for the modules `hal_isp.c` drives they
+agree:
+
+| module | api id | payload | vendor struct | manual offset |
+| --- | --- | --- | --- | --- |
+| ColorToGray | 0x1004 | 4 | 4 | — |
+| Contrast | 0x1005 | 76 | 8 + 16×4 + 4 | 72 |
+| Brightness | 0x1006 | 76 | 8 + 16×4 + 4 | 72 |
+| Saturation | 0x100a | 416 | 8 + 16×24 + 24 | 392 |
+| Defog | 0x100b | 28 | 8 + 16×1 + 1, padded | 24 |
+| AE EvComp | 0x1403 | 8 | `{ MI_S32, MI_U32 }` | — |
+| AE Flicker | 0x140e | 4 | bare enum | — |
+
+Saturation is the row worth dwelling on, because the two derivations are genuinely
+independent and land on the same number. From the headers, `SAT_LUT_X_NUM` is 5 and
+`SAT_LUT_Y_NUM` is 6, so `MI_ISP_IQ_SaturationParam_t` is 1 + 5 + 6 + 5 + 6 + 1 = 24
+bytes; with `MI_ISP_AUTO_NUM` at 16 that puts `stManual` at 8 + 384 = 392 and the
+whole struct at 416. The wrapper says 416 without being asked.
+
+**Eight of the ten modules carry Infinity6E's layout unchanged**, which is worth
+stating precisely because nothing else in this directory does. The exceptions are the
+two with large per-frequency tables: sharpness is 6264 bytes here against Infinity6E's
+1268, and 3DNR 1912 against 1776. Both are excluded from the table rather than
+extrapolated — their manual blocks are per-band arrays rather than a level, so there
+is no single offset a scalar belongs at. Infinity6C reaches 3DNR through
+`i6c_isp_para.level3DNR` instead, which the driver bounds at 7 and names itself.
+
+Defog differs in kind rather than in size. On Infinity6E it is a bare 4-byte enable
+with no auto/manual split; on maruko it is a full module carrying a strength byte, so
+it has a manual offset here where Infinity6E's table needs none. The payload is 28
+either way, which is how the difference stayed invisible until the interior mattered.
