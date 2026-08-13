@@ -1,8 +1,15 @@
 # infinity6c — what has been derived, and how
 
-Working notes for the family. Everything here came out of the prebuilt MI
-libraries the target ships; nothing was taken from vendor source. Kept because
-each number cost a disassembly and the next pass should not repeat it.
+Working notes for the family. Almost everything here came out of the prebuilt MI
+libraries and kernel objects the target ships, with no vendor source involved.
+Kept because each number cost a disassembly and the next pass should not repeat
+it.
+
+The exception is `i6c_aud.h`, which is transcribed from vendor headers that turned
+out to be available, and then checked against the shipped library by the methods
+below rather than taken on trust. Its section says so and shows the check. Where a
+vendor header and a shipped blob disagree, the blob wins — that has already cost
+this project an audio regression once.
 
 ## The libraries are forthcoming about sizes
 
@@ -265,6 +272,74 @@ arm's size is unobservable, so 48 and 12 stay bounded rather than fixed.
 
 Still unchecked in `i6c_venc.h`: every enumeration except `i6c_venc_codec`, whose
 2..4 `ConfigRcAttr` bounds explicitly with `subs r2, r3, #2` / `cmp r2, #2`.
+
+## MI_AI, the one family member that is a transcription
+
+Audio input is the exception to everything above: the vendor's `mi_ai.h`,
+`mi_ai_datatype.h` and `mi_aio_datatype.h` are available, and all three ssc377
+drops (0602, 0712, 0907) ship them **byte-identical** at AI version 3.53. So
+`i6c_aud.h` is transcribed rather than reconstructed.
+
+It was checked against the shipped `libmi_ai.so` anyway, because a vendor header
+that disagrees with the blob it describes has already cost this project an audio
+regression. Both layouts agree, and both are pinned twice over.
+
+| struct | payload | id words | struct |
+| --- | --- | --- | --- |
+| `MI_AI_Attr_t` | 24 | 4 (dev halfword + pad) | **20** |
+| `MI_AI_Data_t` | — | — | **80** |
+
+`MI_AI_Open` gives the first one three ways at once:
+
+```
+1d8c:  lsrs   r7, r0, #16     @ SoC id: the high halfword of AiDevId
+1d90:  uxtb   r6, r0          @ device: its low byte
+1da4:  strh.w r6, [sp, #16]   @ payload+0, as a halfword
+1da8:  strh.w ip, [sp, #18]   @ payload+2, a zero halfword
+1d9c:  ldmia  r4!, {r0,r1,r2,r3}  @ 16 bytes of the caller's struct ...
+1db0:  ldr    r4, [r4, #0]        @ ... and a fifth word
+1db8:  movs   r1, #24         @ payload size
+1dce:  movt   r1, #0x4018     @ _IOC size field: 0x18 = 24
+```
+
+24 less the 4 id bytes is 20, and the five whole words the wrapper reads are the
+five members. Note the fifth: `bInterleaved` is `MI_BOOL`, i.e. one byte, and the
+library marshals it as a word — so the three padding bytes after it cross the
+ioctl boundary. **Clear the struct before filling it**, the same rule the ISP
+section ends on.
+
+`MI_AI_Data_t` never crosses the boundary at all. `MI_AI_Read`'s two ioctls carry
+4- and 12-byte payloads, and the library fills the caller's descriptor in
+userspace from a mapped buffer — the `MI_VENC_Pack_t` exception. That makes its
+interior readable rather than opaque, and it gives up a size and two offsets:
+
+```
+2ae2:  ldr  r3, [sp, #16]         @ the caller's pstData
+2aee:  movs r2, #80               @ ... memset 80 bytes of it
+2b04:  vstr d16, [r7, #64]        @ u64Pts  at +64
+2b08:  strd r0, r1, [r7, #72]     @ u64Seq  at +72
+```
+
+`void *apvBuffer[8]` then `MI_U32 u32Byte[8]` fills 0..63, which puts the two
+64-bit members exactly where the stores land. The second call site at 0x2bd8 does
+the same for the echo-reference descriptor, so both outputs share the layout.
+
+### What the exports say about the module
+
+Only 22 functions, and **four of them are `movs r0, #0; bx lr`** — stubs that
+report success and do nothing:
+
+    MI_AI_OpenWithCfgFile   MI_AI_DupChnGroup   MI_AI_SetIfMute   MI_AI_GetIfMute
+
+Worth more than a footnote, because a stub that returns `MI_SUCCESS` is worse than
+a missing symbol: `dlsym` finds it and the caller cannot tell. `i6c_aud_load.h`
+therefore binds neither mute-by-interface entry, and `hal_audio.c` mutes through
+`MI_AI_SetMute` (the DPGA's, which is real).
+
+Nothing in the export table matches `vqe`, `aenc`, `aed`, `iaa` or `src`. The
+sound-quality algorithms, the audio encoder and the resampler are not absent
+packs behind present entry points, as they are on MI 2.x — they are not in the
+module.
 
 ## The SoC id is usually not a parameter
 
