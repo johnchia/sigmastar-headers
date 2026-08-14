@@ -182,6 +182,41 @@ typedef int (*i6c_isp_cmd_fn)(unsigned int device, unsigned int channel, void *p
 #define I6C_ISP_IQ_GRAY_PAYLOAD       4
 #define I6C_ISP_AE_EVCOMP_PAYLOAD     8
 #define I6C_ISP_AE_FLICKER_PAYLOAD    4
+#define I6C_ISP_AE_EXPOLIMIT_PAYLOAD  32
+
+/*
+ * AE exposure and gain limits. MI_ISP_AE_{Get,Set}ExposureLimit, api id 0x1409,
+ * payload 32 -- and byte-for-byte the Infinity6E i6_isp_exp, which is worth
+ * stating because MI 3.0 shares no layout with MI 2.x anywhere else here.
+ *
+ * Both wrappers declare 32 and both carry that api id, read off their own
+ * literal pools by the method above --
+ *
+ *   MI_ISP_AE_SetExposureLimit:  18000000 20000000  ->  0x20 = 32
+ *   MI_ISP_AE_GetExposureLimit:  18000000 20000000
+ *
+ * cross-checked on the same library against two sizes already in the table
+ * (brightness 0x4c = 76, saturation 0x1a0 = 416).
+ *
+ * The field order is the vendor's, from MI_ISP_AE_ExpoLimitType_t in
+ * isp/mi_isp_ae_datatype.h: the two gain minima sit together ahead of the two
+ * maxima, which is not the min/max pairing the shutter and aperture fields use.
+ * tests/abi_iq_i6c.c asserts every offset against that header, because eight
+ * same-width words in the wrong order are still 32 bytes.
+ */
+typedef struct {
+    unsigned int minShutterUs;
+    unsigned int maxShutterUs;
+    unsigned int minApertX10;
+    unsigned int maxApertX10;
+    unsigned int minSensorGain;
+    unsigned int minIspGain;
+    unsigned int maxSensorGain;
+    unsigned int maxIspGain;
+} i6c_isp_exp;
+
+_Static_assert(sizeof(i6c_isp_exp) == I6C_ISP_AE_EXPOLIMIT_PAYLOAD,
+               "MI_ISP_AE_ExpoLimitType_t, and the wrapper declares 32");
 
 /* X(row, vendor type) -- payload is { bEnable, enOpType, stAuto[16], stManual }. */
 #define I6C_ISP_IQ_AUTOMAN_ROWS(X)                \
