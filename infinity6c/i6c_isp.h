@@ -153,12 +153,24 @@ _Static_assert(offsetof(i6c_isp_port, multiPlanes) == 16, "printed as the layout
  *
  * Eight of the ten modules hal_isp drives on Infinity6E carry the same
  * layout here, which is worth stating because MI 3.0 shares no layout with
- * MI 2.x anywhere else in this directory. The two that differ are the ones
- * with the large per-frequency tables -- sharpness is 6264 bytes against
- * Infinity6E's 1268, 3DNR 1912 against 1776 -- so they are deliberately
- * absent below rather than guessed at. Their interiors are per-band arrays
- * rather than a level, and a single scalar has no honest place to land in
- * one; Infinity6C reaches 3DNR through i6c_isp_para.level3DNR instead.
+ * MI 2.x anywhere else in this directory. The ones that differ are those
+ * with the large per-band tables -- sharpness is 6264 bytes against
+ * Infinity6E's 1268, 3DNR 1912 against 1776 -- so a level cannot simply be
+ * poked at Infinity6E's offset.
+ *
+ * Two of those three now have a STRENGTH offset below as well, because a
+ * per-band table does have an honest scalar in it: not one field, but one
+ * contiguous run of same-width fields that all mean strength, which a knob
+ * scales together about whatever the tuning left there. hal_isp.c calls that
+ * shape IQ_VECTOR, and STRENGTH_NUM/STRENGTH_MAX are the run's length and
+ * the vendor's per-field bound. Everything else in the module -- the
+ * thresholds, the kernels, the by-luma and by-motion curves -- stays as the
+ * tuning wrote it.
+ *
+ * 3DNR still has none. Its interior is thresholds and per-band weights with
+ * no run that means "how much", and Infinity6C reaches it through
+ * i6c_isp_para.level3DNR instead, which is one field the driver itself
+ * bounds at 7.
  *
  * DEFOG is the one module whose vendor struct differs from Infinity6E's in
  * kind rather than size. There it is a bare 4-byte enable; on maruko it is
@@ -178,6 +190,44 @@ typedef int (*i6c_isp_cmd_fn)(unsigned int device, unsigned int channel, void *p
 #define I6C_ISP_IQ_SATURATION_MANUAL  392
 #define I6C_ISP_IQ_DEFOG_PAYLOAD      28
 #define I6C_ISP_IQ_DEFOG_MANUAL       24
+
+/*
+ * Sharpness. MI_ISP_IQ_{Get,Set}Sharpness, api id 0x1012, payload 6264 --
+ * 8 + 16 * 368 + 368, from MI_ISP_IQ_SharpnessParam_t at 368 bytes.
+ *
+ * The run is u8SharpnessUD[3] immediately followed by u8SharpnessD[3], both
+ * at the front of the parameter block: the per-frequency gains for the
+ * undirectional and directional sharpeners, three bands each, every one of
+ * them 0..127. They are one six-byte run only because the vendor happens to
+ * declare them adjacent, which abi_iq_i6c.c asserts rather than assumes --
+ * a header drop that separates them would otherwise have a knob writing
+ * u8PreCorUD as if it were sharpening strength.
+ */
+#define I6C_ISP_IQ_SHARPNESS_PAYLOAD      6264
+#define I6C_ISP_IQ_SHARPNESS_MANUAL       5896
+#define I6C_ISP_IQ_SHARPNESS_STRENGTH     0
+#define I6C_ISP_IQ_SHARPNESS_STRENGTH_NUM 6
+#define I6C_ISP_IQ_SHARPNESS_STRENGTH_MAX 127
+
+/*
+ * Advanced spatial luma denoise, which is what raptor calls sinter.
+ * MI_ISP_IQ_{Get,Set}NrLumaAdv, api id 0x102d, payload 3544 --
+ * 8 + 16 * 208 + 208, from MI_ISP_IQ_NrLumaAdvParam_t at 208 bytes.
+ *
+ * The run is u16Strength[2], which the vendor header itself labels
+ * "blending (global strength)": how much of the filtered luma is mixed back
+ * over the original, per level. 0..256 and not 0..255 -- 256 is unity, a
+ * full swap for the filtered plane, so the bound is one past what a byte
+ * would hold and the field is sixteen bits for that reason.
+ *
+ * Note there is a plain MI_ISP_IQ_NrLuma module as well. It is the older,
+ * emptier one; NrLumaAdv is what the maruko tuning binaries carry.
+ */
+#define I6C_ISP_IQ_NRLUMAADV_PAYLOAD      3544
+#define I6C_ISP_IQ_NRLUMAADV_MANUAL       3336
+#define I6C_ISP_IQ_NRLUMAADV_STRENGTH     180
+#define I6C_ISP_IQ_NRLUMAADV_STRENGTH_NUM 2
+#define I6C_ISP_IQ_NRLUMAADV_STRENGTH_MAX 256
 
 #define I6C_ISP_IQ_GRAY_PAYLOAD       4
 #define I6C_ISP_AE_EVCOMP_PAYLOAD     8
@@ -230,5 +280,17 @@ _Static_assert(sizeof(i6c_isp_exp) == I6C_ISP_AE_EXPOLIMIT_PAYLOAD,
     X(IQ_GRAY,    MI_ISP_IQ_ColorToGrayType_t)    \
     X(AE_EVCOMP,  MI_ISP_AE_EvCompType_t)         \
     X(AE_FLICKER, MI_ISP_AE_FlickerType_e)
+
+/*
+ * X(row, vendor type, vendor param type, first field of the strength run,
+ * field width) -- the same { bEnable, enOpType, stAuto[16], stManual } payload
+ * as the auto/manual rows, but the value is a run of STRENGTH_NUM fields
+ * starting at STRENGTH inside stManual rather than a single level.
+ */
+#define I6C_ISP_IQ_VECTOR_ROWS(X)                                                \
+    X(IQ_SHARPNESS,  MI_ISP_IQ_SharpnessType_t,  MI_ISP_IQ_SharpnessParam_t,     \
+      u8SharpnessUD, MI_U8)                                                      \
+    X(IQ_NRLUMAADV,  MI_ISP_IQ_NrLumaAdvType_t,  MI_ISP_IQ_NrLumaAdvParam_t,     \
+      u16Strength,   MI_U16)
 
 #endif /* SIGMASTAR_I6C_ISP_H */
