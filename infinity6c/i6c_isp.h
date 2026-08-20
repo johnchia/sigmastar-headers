@@ -188,6 +188,22 @@ typedef int (*i6c_isp_cmd_fn)(unsigned int device, unsigned int channel, void *p
 #define I6C_ISP_IQ_CONTRAST_MANUAL    72
 #define I6C_ISP_IQ_SATURATION_PAYLOAD 416
 #define I6C_ISP_IQ_SATURATION_MANUAL  392
+/*
+ * WDR -- raptor's DRC knob. The level is one byte inside the manual block
+ * rather than the whole of it, so it takes a third number: MANUAL is
+ * offsetof(stManual) and STRENGTH is offsetof(u8Strength) within an entry.
+ *
+ * Derived three ways here and all three agree. The schema in
+ * sensor/firmware/isp_api.xml gives a 112-byte entry with Strength at +34,
+ * so 8 + 16*112 = 1800 and the level lands at 1834. The wrapper's own
+ * literal pool declares 0x778 = 1912. And majestic, which has driven this
+ * module on this SoC for years, memsets 1912 and writes its byte at
+ * 0x72a = 1834 (/usr/bin/majestic, the store at 0x2a812).
+ */
+#define I6C_ISP_IQ_WDR_PAYLOAD        1912
+#define I6C_ISP_IQ_WDR_MANUAL         1800
+#define I6C_ISP_IQ_WDR_STRENGTH       34
+
 #define I6C_ISP_IQ_DEFOG_PAYLOAD      28
 #define I6C_ISP_IQ_DEFOG_MANUAL       24
 

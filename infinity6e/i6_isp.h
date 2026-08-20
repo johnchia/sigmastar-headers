@@ -188,6 +188,21 @@ typedef int (*i6_isp_cmd_fn)(int channel, void *payload);
 #define I6_ISP_IQ_NR3D_PAYLOAD       1776
 #define I6_ISP_IQ_NR3D_MANUAL        1672
 
+/*
+ * WDR -- raptor's DRC knob; see the Infinity6C header for the shape. The
+ * layout is not Infinity6C's: the entry is 52 bytes rather than 112 and
+ * Strength sits at +43, so nothing here can be poked at the other family's
+ * offset. Derived twice and agreeing: the schema gives 8 + 17*52 = 892 with
+ * the level at 8 + 16*52 + 43 = 883, and the wrapper declares 0x37c = 892.
+ *
+ * The symbol is MI_ISP_IQ_GetWDR here and MI_ISP_IQ_GetWdr on Infinity6C --
+ * the vendor capitalises it differently per family, which a shared table
+ * would otherwise get wrong.
+ */
+#define I6_ISP_IQ_WDR_PAYLOAD        892
+#define I6_ISP_IQ_WDR_MANUAL         840
+#define I6_ISP_IQ_WDR_STRENGTH       43
+
 #define I6_ISP_IQ_DEFOG_PAYLOAD      28
 #define I6_ISP_IQ_GRAY_PAYLOAD       4
 #define I6_ISP_AE_EVCOMP_PAYLOAD     8
