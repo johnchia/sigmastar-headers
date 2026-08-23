@@ -4,28 +4,33 @@
  * Vendored from OpenIPC divinus, src/hal/star/i6_vpe.h (MIT).
  * See i6_common.h for why these declarations are vendored rather than derived.
  *
- * IMPORTANT -- two channel/param layouts, and only ONE of them is the i6e_ one.
- * divinus treats MI_VPE_CreateChannel and MI_VPE_SetChannelParam as a pair,
- * picking the longer i6e_ struct for both by SoC series and casting to the
- * shorter type the function pointers name (i6_hal.c:302-345, `if (series ==
- * 0xF1)`). That is right for CreateChannel and wrong for SetChannelParam.
+ * IMPORTANT -- two channel/param layouts, and the family picks. divinus is
+ * right about this (i6_hal.c:302-345, `if (series == 0xF1)`): Infinity6E takes
+ * the longer i6e_ structs, Infinity6B0 the shorter i6_ ones, for BOTH
+ * MI_VPE_CreateChannel and MI_VPE_SetChannelParam.
  *
- * MI_VPE_ChannelPara_t has no lens-distortion member on any Infinity6 family.
- * Checked against three vendor SDK drops -- ssc335 (Ispahan/6B0), ssc336q
- * (Pudding/6E) and ssc377 (Maruko/6C), all byte-identical: eHDRType follows
- * stPqParam directly, so e3DNRLevel sits at +20. i6e_vpe_para interposes a
- * 72-byte i6e_vpe_ldc and puts level3DNR at +92, which is why it must not be
- * handed to MI_VPE_SetChannelParam. i6_vpe_para is the correct layout for
- * every family and is what the backend now fills; see the asserts below.
+ * Do not settle this from the vendor SDK headers. ssc335 (Ispahan/6B0),
+ * ssc336q (Pudding/6E) and ssc377 (Maruko/6C) all declare the SHORT
+ * MI_VPE_ChannelPara_t, with eHDRType straight after stPqParam -- and that is
+ * simply not what the shipped libmi_vpe.so does on 6E. The library is the
+ * ground truth because it never interprets the struct: MI_VPE_SetChannelParam
+ * memcpys it whole into an ioctl buffer, so the copy length IS the ABI.
  *
- * The measured symptom, on an SSC333 with a 2304x1296 sensor: the driver read
- * e3DNRLevel out of the zeroed phantom LDC block, logged "3DNR = 0" from
- * MhalCameraOpen, allocated no DNR reference frame at all, and every NR3D
- * value in the tuning binary was inert because the engine never ran.
+ *   6E   (ssc30kq, libmi_vpe.so dc127daf)  memset 104, memcpy 100
+ *                                          = sizeof(i6e_vpe_para), 16+72+4+4+4
+ *   6B0  (ssc333,  libmi_vpe.so 970fcb10)  memset  32, memcpy  28
+ *                                          = sizeof(i6_vpe_para),  16+4+4+4
  *
- * MI_VPE_ChannelAttr_t is the opposite case and i6e_vpe_chn is deliberate
- * there -- see the note on i6e_vpe_ildc below for why its extra block is
- * harmless while this one was not.
+ * So e3DNRLevel is at +92 on 6E and +20 on 6B0, and a backend serving both
+ * must choose per platform -- star_state.h does, via star_vpe_para.
+ *
+ * What handing 6B0 the i6e_ form cost, measured on an SSC333 at 2304x1296:
+ * its libmi_vpe.so copied the first 28 bytes of a 100-byte struct, so
+ * e3DNRLevel came out of the zeroed LDC block, MhalCameraOpen logged
+ * "3DNR = 0", no DNR reference frame was allocated, and every NR3D value in
+ * the tuning binary was inert because the engine never ran. On 6E the same
+ * code has always been correct -- .229 shows DNR_INFO0 at 0x5a0000, the
+ * level-2 signature at 1440 rows.
  *
  * Copyright (c) 2024 OpenIPC
  * SPDX-License-Identifier: MIT
@@ -169,12 +174,8 @@ typedef struct {
     unsigned int chnPort;
 } i6_vpe_chn;
 
-/*
- * NOT MI_VPE_ChannelPara_t on any family -- see the header comment. Kept
- * unused so this file stays diffable against upstream divinus, which has the
- * same struct and the same mistake. Nothing may pass this to
- * MI_VPE_SetChannelParam; use i6_vpe_para.
- */
+/* MI_VPE_ChannelPara_t as Infinity6E's libmi_vpe.so reads it: 100 bytes,
+ * level3DNR at +92. Infinity6B0 wants i6_vpe_para instead -- see above. */
 typedef struct {
     char reserved[16];
     i6e_vpe_ldc lensAdj;
@@ -200,14 +201,17 @@ typedef struct {
 
 /*
  * reserved[16] is MI_VPE_PqParam_t (nine NR strengths, six edge gains and a
- * contrast, all MI_U8); reserved2 and lensAdjOn are bWdrEn and bEnLdc. The
- * offsets are the whole point of this struct, so they are asserted rather
- * than trusted.
+ * contrast, all MI_U8); reserved2 and lensAdjOn are bWdrEn and bEnLdc.
+ *
+ * The sizes are asserted because each one is the exact number of bytes its
+ * family's libmi_vpe.so memcpys out of this struct, and a mismatch is silent:
+ * the ioctl still succeeds, it just carries the wrong fields.
  */
+_Static_assert(sizeof(i6_vpe_para) == 28, "Infinity6B0 libmi_vpe.so copies 28");
 _Static_assert(offsetof(i6_vpe_para, hdr) == 16, "eHDRType sits at +16");
 _Static_assert(offsetof(i6_vpe_para, level3DNR) == 20, "e3DNRLevel sits at +20");
-_Static_assert(offsetof(i6_vpe_para, mirror) == 24, "bMirror sits at +24");
-_Static_assert(offsetof(i6_vpe_para, flip) == 25, "bFlip sits at +25");
+_Static_assert(sizeof(i6e_vpe_para) == 100, "Infinity6E libmi_vpe.so copies 100");
+_Static_assert(offsetof(i6e_vpe_para, level3DNR) == 92, "6E e3DNRLevel at +92");
 
 typedef struct {
     i6_common_dim output;
