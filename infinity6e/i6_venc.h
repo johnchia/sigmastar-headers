@@ -4,12 +4,27 @@
  * Vendored from OpenIPC divinus, src/hal/star/i6_venc.h (MIT).
  * See i6_common.h for why these declarations are vendored rather than derived.
  *
- * Rate-control mode numbering differs between the original Infinity6
- * (series 0xEF, I6OG_VENC_RATEMODE_*) and everything later, because 0xEF
- * has no UBR modes: its H264UBR slot does not exist, so everything from
- * MJPEGCBR onward sits one lower than on 0xF1. Infinity6E is 0xF1, so use
- * the plain I6_VENC_RATEMODE_* set; the I6OG_ enum is kept only to stay
- * diffable against upstream, which supports both.
+ * Rate-control mode numbering is read from the driver, not from upstream.
+ * _MI_VENC_IMPL_CheckRcMode, inlined into MI_VENC_IMPL_CreateChn, range-checks
+ * the mode per codec, and both shipped mi_venc.ko builds agree exactly:
+ *
+ *     eType 2 (H.264)   mode-1 <= 4    ->  1..5
+ *     eType 3 (H.265)   mode-8 <= 3    ->  8..11
+ *
+ * Five H.264 slots, then MJPEG's two, then four H.265 slots. That is what the
+ * enum below spells. The version this replaces had the H.264 block as
+ * CBR/VBR/FIXQP/AVBR/UBR, which put FIXQP and AVBR one low: measured on an
+ * SSC333, asking for AVBR gave a channel the driver reported as FixQP, and
+ * asking for FIXQP landed on slot 3 -- which is ABR, and which this part does
+ * not implement. H.265 was unaffected because its block starts at a fixed 8
+ * and holds four modes either way.
+ *
+ * There are no UBR modes here. The slot upstream calls H264UBR is AVBR, and
+ * H265UBR at 12 is outside what the driver accepts at all.
+ *
+ * The I6OG_ enum below is the original Infinity6 (series 0xEF) numbering,
+ * kept only to stay diffable against upstream, which supports both. Nothing
+ * in this backend uses it.
  *
  * I6_VENC_CHN_NUM below is where hal_caps.c's INFINITY6E max_enc_channels
  * comes from -- 9 addressable channels, capped to RSS_MAX_ENC_CHANNELS.
@@ -71,16 +86,17 @@ typedef enum {
 typedef enum {
     I6_VENC_RATEMODE_H264CBR = 1,
     I6_VENC_RATEMODE_H264VBR,
+    /* Slot 3 is ABR, not a codec raptor maps anything to. Named so the two
+     * that follow it sit at the numbers the driver reads. */
+    I6_VENC_RATEMODE_H264ABR,
     I6_VENC_RATEMODE_H264FIXQP,
     I6_VENC_RATEMODE_H264AVBR,
-    I6_VENC_RATEMODE_H264UBR,
     I6_VENC_RATEMODE_MJPGCBR,
     I6_VENC_RATEMODE_MJPGFIXQP,
     I6_VENC_RATEMODE_H265CBR,
     I6_VENC_RATEMODE_H265VBR,
     I6_VENC_RATEMODE_H265FIXQP,
     I6_VENC_RATEMODE_H265AVBR,
-    I6_VENC_RATEMODE_H265UBR,
     I6_VENC_RATEMODE_END
 } i6_venc_ratemode;
 
