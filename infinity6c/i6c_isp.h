@@ -284,6 +284,35 @@ typedef struct {
 _Static_assert(sizeof(i6c_isp_exp) == I6C_ISP_AE_EXPOLIMIT_PAYLOAD,
                "MI_ISP_AE_ExpoLimitType_t, and the wrapper declares 32");
 
+/*
+ * NR3D -- raptor's temper knob, and the one row whose value is written into
+ * stAuto rather than stManual.
+ *
+ * u8TfStrY is the temporal denoise strength for luma. SigmaStar's MARUKO
+ * tuning SOP section 3.3.1 gives it as "值域 0 ~ 127，值越大 denoise 强度越强"
+ * and warns that above 64 moving objects smear; sensor/firmware/isp_api.xml
+ * annotates the same field "64 is x1 gain". So it is a unity-referenced
+ * multiplier on the temporal filter, which is what makes it a temper knob and
+ * MdGain -- a motion *scale*, and the field that ramps with gain -- not one.
+ *
+ * ENTRY is sizeof(MI_ISP_IQ_Nr3dParam_t) and AUTO is offsetof(stAuto): together
+ * the stride and the base of the sixteen-entry run. 8 + 16 * 112 = 1800 puts
+ * stManual there and the payload at 1912, which are the same two numbers WDR
+ * has -- a coincidence of two 112-byte parameter blocks, not a shared layout.
+ *
+ * TFSTRY is zero because u8TfStrY is the first field of the block. Named anyway:
+ * a field that moves is exactly what tests/abi_iq_i6c.c exists to catch, and an
+ * offset that is right by accident is not checked by anything.
+ *
+ * The 1912 is measured as well as derived -- api id 4110 carries a 1912-byte
+ * block in every shipped Infinity6C tuning to hand (imx335 and gc4653).
+ */
+#define I6C_ISP_IQ_NR3D_PAYLOAD  1912
+#define I6C_ISP_IQ_NR3D_AUTO     8
+#define I6C_ISP_IQ_NR3D_ENTRY    112
+#define I6C_ISP_IQ_NR3D_TFSTRY   0
+#define I6C_ISP_IQ_NR3D_AUTO_NUM 16
+
 /* X(row, vendor type) -- payload is { bEnable, enOpType, stAuto[16], stManual }. */
 #define I6C_ISP_IQ_AUTOMAN_ROWS(X)                \
     X(IQ_BRIGHTNESS, MI_ISP_IQ_BrightnessType_t)  \
@@ -308,5 +337,22 @@ _Static_assert(sizeof(i6c_isp_exp) == I6C_ISP_AE_EXPOLIMIT_PAYLOAD,
       u8SharpnessUD, MI_U8)                                                      \
     X(IQ_NRLUMAADV,  MI_ISP_IQ_NrLumaAdvType_t,  MI_ISP_IQ_NrLumaAdvParam_t,     \
       u16Strength,   MI_U16)
+
+/*
+ * X(row, vendor type, vendor param type, field, field width, field offset) -- a run
+ * of one
+ * field taken across the sixteen gain-indexed stAuto entries, rather than a run
+ * of adjacent fields inside stManual.
+ *
+ * The point of the shape is what it does *not* do: enOpType stays M_AUTO, so
+ * MI keeps interpolating the entries by gain and every other field in the
+ * module keeps the curve the tuner gave it. Writing stManual instead would cost
+ * all of it -- 672 of NR3D's 1488 tuned values vary by gain on the shipped
+ * imx335 bin, and its manual entry is an unpopulated block with MdGain 0 and a
+ * TfLut whose last element breaks the vendor's own "must be 0" rule.
+ */
+#define I6C_ISP_IQ_GAINRUN_ROWS(X)                                               \
+    X(IQ_NR3D,       MI_ISP_IQ_Nr3dType_t,       MI_ISP_IQ_Nr3dParam_t,          \
+      u8TfStrY,      MI_U8,                      I6C_ISP_IQ_NR3D_TFSTRY)
 
 #endif /* SIGMASTAR_I6C_ISP_H */
