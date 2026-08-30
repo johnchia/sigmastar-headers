@@ -189,6 +189,45 @@ typedef int (*i6_isp_cmd_fn)(int channel, void *payload);
 #define I6_ISP_IQ_NR3D_MANUAL        1672
 
 /*
+ * NR3D -- raptor's temper knob, and the one row whose value is written into
+ * stAuto rather than stManual.
+ *
+ * u8TfStr is the temporal denoise strength. Pudding has one strength plus an
+ * extension where Maruko splits luma and chroma, and it is bounded at 64 where
+ * Maruko's TfStrY runs to 127 -- isp_api.xml annotates the Maruko field "64 is
+ * x1 gain", so a ceiling of exactly 64 here is unity and this family publishes
+ * no headroom above it. Every shipped Infinity6E tuning sits at that ceiling,
+ * flat across all sixteen entries, which is what lets one scalar stand for the
+ * run; the knob's whole travel is therefore downward, and that is a property of
+ * the field rather than a choice raptor makes. MdGain is the field that ramps
+ * with gain and it is not this knob -- the vendor SOP calls it a motion scale.
+ *
+ * ENTRY is sizeof(NR3D_PARAM_t) and AUTO is offsetof(stAuto): together the
+ * stride and the base of the sixteen-entry run. 8 + 16 * 104 = 1672 is
+ * stManual and 1776 the payload, which is what MI_ISP_IQ_SetNR3D declares
+ * (mov.w r3, #1776) and what api id 4110 carries in every shipped 6E bin.
+ *
+ * 104 and not the 102 the XML's field list sums to: NR3D_PARAM_t opens with a
+ * u8 followed by a u16, so the struct carries a pad byte after u8MdThd and one
+ * on the tail. Worth stating because the padded reading is not the obvious one
+ * and both readings produce plausible numbers -- decoding the six shipped 6E
+ * tunings packed puts 435..479 field values outside their own declared ranges,
+ * where the aligned reading puts at most one, in the unused manual entry.
+ *
+ * TFSTR is 4 for the same reason, and is named rather than spelled inline
+ * because a field that moves between SoCs is exactly what tests/abi_iq.c
+ * exists to catch.
+ *
+ * The symbol is MI_ISP_IQ_GetNR3D here and MI_ISP_IQ_GetNr3d on Infinity6C.
+ * The vendor capitalises it per family, as with WDR, so a shared table would
+ * resolve one of the two to nothing.
+ */
+#define I6_ISP_IQ_NR3D_AUTO          8
+#define I6_ISP_IQ_NR3D_ENTRY         104
+#define I6_ISP_IQ_NR3D_TFSTR         4
+#define I6_ISP_IQ_NR3D_AUTO_NUM      16
+
+/*
  * WDR -- raptor's DRC knob; see the Infinity6C header for the shape. The
  * layout is not Infinity6C's: the entry is 52 bytes rather than 112 and
  * Strength sits at +43, so nothing here can be poked at the other family's
@@ -214,8 +253,7 @@ typedef int (*i6_isp_cmd_fn)(int channel, void *payload);
     X(IQ_CONTRAST,   MI_ISP_IQ_CONTRAST_TYPE_t)   \
     X(IQ_SATURATION, MI_ISP_IQ_SATURATION_TYPE_t) \
     X(IQ_SHARPNESS,  MI_ISP_IQ_SHARPNESS_TYPE_t)  \
-    X(IQ_NRLUMA,     MI_ISP_IQ_NRLUMA_TYPE_t)     \
-    X(IQ_NR3D,       MI_ISP_IQ_NR3D_TYPE_t)
+    X(IQ_NRLUMA,     MI_ISP_IQ_NRLUMA_TYPE_t)
 
 /* X(row, vendor type) -- no auto/manual split; the field written is at offset 0. */
 #define I6_ISP_IQ_FLAT_ROWS(X)                  \
@@ -223,5 +261,20 @@ typedef int (*i6_isp_cmd_fn)(int channel, void *payload);
     X(IQ_GRAY,    MI_ISP_IQ_COLORTOGRAY_TYPE_t) \
     X(AE_EVCOMP,  MI_ISP_AE_EV_COMP_TYPE_t)     \
     X(AE_FLICKER, MI_ISP_AE_FLICKER_TYPE_e)
+
+/*
+ * X(row, vendor type, vendor param type, field, field width, field offset) -- a
+ * run of one field taken across the sixteen gain-indexed stAuto entries, rather
+ * than a single level inside stManual.
+ *
+ * The point of the shape is what it does *not* do: enOpType stays auto, so MI
+ * keeps interpolating the entries by gain and every other field in the module
+ * keeps the curve the tuner gave it. Writing stManual instead would cost all of
+ * it -- NR3D is 1776 bytes of tuning here and its per-gain curves carry the
+ * motion detector, which is where this family's shipped tunings do their work.
+ */
+#define I6_ISP_IQ_GAINRUN_ROWS(X)                                    \
+    X(IQ_NR3D,       MI_ISP_IQ_NR3D_TYPE_t,     NR3D_PARAM_t,        \
+      u8TfStr,       MI_U8,                     I6_ISP_IQ_NR3D_TFSTR)
 
 #endif /* SIGMASTAR_I6_ISP_H */
