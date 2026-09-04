@@ -208,6 +208,66 @@ typedef int (*i6c_isp_cmd_fn)(unsigned int device, unsigned int channel, void *p
 #define I6C_ISP_IQ_DEFOG_MANUAL       24
 
 /*
+ * Colour transform. MI_ISP_IQ_{Get,Set}ColorTrans, payload 28 --
+ * MI_ISP_IQ_ColorTransType_t is bEnable followed directly by a single manual
+ * block of three u16 offsets and a 3x3 u16 matrix. It carries no enOpType and
+ * no stAuto: the module has one set of values for every gain, so nothing about
+ * it is interpolated and there is no per-gain curve for a write to displace.
+ *
+ * The matrix is the RGB-to-YUV conversion, held over 256 in YUV row order with
+ * negative coefficients in 10-bit two's complement, so the field's stated
+ * 0..1023 spans -512..511. A shipped tuning reads 77 150 29 / -43 -85 128 /
+ * 128 -107 -21, which is BT.601 at full swing to within half a count -- and is
+ * *not* what the ISP puts out while the module is disabled, which is measurably
+ * the limited-range form of the same conversion. See i6c_ct_capture.
+ *
+ * The offsets are 11-bit two's complement over the same 0..2047, and they are
+ * in a quarter-count luma domain: Y_OFST 64 raises 8-bit luma by 16. Only Y's
+ * is used. Chroma needs none, because the hardware adds the 128 pedestal after
+ * the matrix rather than through this field -- which is what makes scaling the
+ * two chroma rows a saturation control that pivots on neutral grey by itself.
+ */
+#define I6C_ISP_IQ_COLORTRANS_PAYLOAD 28
+#define I6C_ISP_IQ_COLORTRANS_MANUAL  4
+#define I6C_ISP_IQ_COLORTRANS_YOFST   4
+#define I6C_ISP_IQ_COLORTRANS_UOFST   6
+#define I6C_ISP_IQ_COLORTRANS_VOFST   8
+#define I6C_ISP_IQ_COLORTRANS_MATRIX  10
+#define I6C_ISP_IQ_COLORTRANS_MAT_NUM 9
+/*
+ * The two fields' widths, as the modulus a negative value wraps at rather than
+ * as a bit count: both are written back through an unsigned field, so this is
+ * what the arithmetic actually needs.
+ */
+#define I6C_ISP_IQ_COLORTRANS_MAT_WRAP  1024
+#define I6C_ISP_IQ_COLORTRANS_OFST_WRAP 2048
+
+/*
+ * The EX block beside it: an enable and a one-byte type selector. It is the
+ * other half of the same question, because a preset chosen here decides the
+ * conversion whatever the custom matrix says -- so a tuning that enables EX
+ * silently takes the matrix out of the path.
+ */
+#define I6C_ISP_IQ_COLORTRANSEX_PAYLOAD 8
+#define I6C_ISP_IQ_COLORTRANSEX_TYPE    4
+
+/*
+ * R2Y, the other RGB-to-YUV matrix, and the same manual-only shape. Unity is
+ * 1024 here against Colortrans' 256, the field runs 0..8191 in VYU row order,
+ * and the only offset is a flag for whether to add 16 to Y after the multiply.
+ *
+ * Recorded rather than driven. It is the finer of the two and has no offsets to
+ * pivot a contrast or brightness term on, which makes it the one to reach for
+ * when a calibration wants to change the conversion itself and the wrong one
+ * for a knob a user turns.
+ */
+#define I6C_ISP_IQ_R2Y_PAYLOAD        24
+#define I6C_ISP_IQ_R2Y_MANUAL         4
+#define I6C_ISP_IQ_R2Y_MATRIX         4
+#define I6C_ISP_IQ_R2Y_ADDY16         22
+#define I6C_ISP_IQ_R2Y_MAT_NUM        9
+
+/*
  * Sharpness. MI_ISP_IQ_{Get,Set}Sharpness, api id 0x1012, payload 6264 --
  * 8 + 16 * 368 + 368, from MI_ISP_IQ_SharpnessParam_t at 368 bytes.
  *
@@ -354,5 +414,18 @@ _Static_assert(sizeof(i6c_isp_exp) == I6C_ISP_AE_EXPOLIMIT_PAYLOAD,
 #define I6C_ISP_IQ_GAINRUN_ROWS(X)                                               \
     X(IQ_NR3D,       MI_ISP_IQ_Nr3dType_t,       MI_ISP_IQ_Nr3dParam_t,          \
       u8TfStrY,      MI_U8,                      I6C_ISP_IQ_NR3D_TFSTRY)
+
+/*
+ * X(row, vendor type) -- bEnable followed directly by stManual, with no
+ * enOpType and no auto array between them.
+ *
+ * Worth its own list rather than folding into the auto/manual one, because the
+ * shapes differ in the thing that matters: MANUAL at 4 here is the field
+ * itself, where MANUAL at 4 on an auto/manual row would be enOpType and a
+ * write there would swap the module's mode instead of setting its value.
+ */
+#define I6C_ISP_IQ_MANUALONLY_ROWS(X)                 \
+    X(IQ_COLORTRANS, MI_ISP_IQ_ColorTransType_t)      \
+    X(IQ_R2Y,        MI_ISP_IQ_R2YType_t)
 
 #endif /* SIGMASTAR_I6C_ISP_H */
